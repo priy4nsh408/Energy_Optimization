@@ -677,6 +677,9 @@ python app.py                                         # then open http://127.0.0
 
 ## Development status
 
+See `docs/PROGRESS.md` for the handoff notes: current state, how to resume, regenerating data and models, and the next steps.
+
+
 | # | Module | Status |
 |---|---|---|
 | 1 | Project setup and configuration | ✅ Done |
