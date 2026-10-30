@@ -2,42 +2,70 @@
 {% block title %}Dashboard{% endblock %}
 {% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">{% endblock %}
 {% block content %}
+<div class="page-head">
+  <h1><i class="bi bi-building"></i> Building overview</h1>
+  <p class="lead-sm">A live view of the simulated five-zone office building. Press <strong>Start</strong> to run
+    the simulation: one simulated hour passes every 12 seconds.</p>
+</div>
+
+<details class="explain">
+  <summary>How to read this page</summary>
+  <ul>
+    <li><strong>Top tiles</strong>: the building's power right now, the energy and CO₂ of the last simulated day,
+      and how many security alerts are still open.</li>
+    <li><strong>Zone cards</strong>: the latest reading of each room or area. Colours show comfort: green is good,
+      orange is borderline, red is poor. A red border means the zone has a recent security alert.</li>
+    <li><strong>Power chart</strong>: how much electricity each zone uses, updated with every new reading.</li>
+    <li><strong>Alerts and agent</strong>: the newest security alerts and what the AI agent decided about them.</li>
+  </ul>
+</details>
+
 <div class="row g-3 mb-3" id="kpis">
-  <div class="col-6 col-lg-3"><div class="card kpi"><div class="card-body">
-    <div class="kpi-label">Building power</div><div class="kpi-value" id="kpi-power">—</div>
-    <div class="kpi-sub" id="kpi-power-sub">latest reading</div></div></div></div>
-  <div class="col-6 col-lg-3"><div class="card kpi"><div class="card-body">
-    <div class="kpi-label">Energy (last 24 h sim.)</div><div class="kpi-value" id="kpi-energy">—</div>
-    <div class="kpi-sub" id="kpi-energy-sub">—</div></div></div></div>
-  <div class="col-6 col-lg-3"><div class="card kpi"><div class="card-body">
-    <div class="kpi-label">Carbon (last 24 h sim.)</div><div class="kpi-value" id="kpi-carbon">—</div>
-    <div class="kpi-sub" id="kpi-carbon-sub">—</div></div></div></div>
-  <div class="col-6 col-lg-3"><div class="card kpi"><div class="card-body">
-    <div class="kpi-label">Open alerts</div><div class="kpi-value" id="kpi-alerts">—</div>
-    <div class="kpi-sub" id="kpi-alerts-sub">—</div></div></div></div>
+  <div class="col-6 col-lg-3"><div class="card kpi h-100"><div class="card-body">
+    <div class="kpi-icon bg-grad-blue"><i class="bi bi-lightning-charge-fill"></i></div><div>
+    <div class="kpi-label">Building power now</div><div class="kpi-value" id="kpi-power">—</div>
+    <div class="kpi-sub" id="kpi-power-sub">latest reading</div></div></div></div></div>
+  <div class="col-6 col-lg-3"><div class="card kpi h-100"><div class="card-body">
+    <div class="kpi-icon bg-grad-green"><i class="bi bi-battery-charging"></i></div><div>
+    <div class="kpi-label">Energy, last 24 h</div><div class="kpi-value" id="kpi-energy">—</div>
+    <div class="kpi-sub" id="kpi-energy-sub">—</div></div></div></div></div>
+  <div class="col-6 col-lg-3"><div class="card kpi h-100"><div class="card-body">
+    <div class="kpi-icon bg-grad-teal"><i class="bi bi-cloud-haze2-fill"></i></div><div>
+    <div class="kpi-label">CO₂ emitted, last 24 h</div><div class="kpi-value" id="kpi-carbon">—</div>
+    <div class="kpi-sub" id="kpi-carbon-sub">—</div></div></div></div></div>
+  <div class="col-6 col-lg-3"><div class="card kpi h-100"><div class="card-body">
+    <div class="kpi-icon bg-grad-red"><i class="bi bi-shield-exclamation"></i></div><div>
+    <div class="kpi-label">Open security alerts</div><div class="kpi-value" id="kpi-alerts">—</div>
+    <div class="kpi-sub" id="kpi-alerts-sub">—</div></div></div></div></div>
 </div>
 
 <div class="row g-3 mb-3">
   <div class="col-12 col-xl-8">
-    <div class="card h-100"><div class="card-header"><i class="bi bi-thermometer-half"></i> Live sensor readings</div>
-      <div class="card-body"><div class="row g-2" id="zone-cards"><p class="text-muted">Loading…</p></div></div></div>
+    <div class="card h-100"><div class="card-header d-flex justify-content-between align-items-center">
+      <span><i class="bi bi-thermometer-half"></i> Live sensor readings</span>
+      <span class="hint" id="zones-updated">—</span></div>
+      <div class="card-body"><div class="row g-3" id="zone-cards"><p class="text-muted">Loading…</p></div></div></div>
   </div>
   <div class="col-12 col-xl-4">{% include "_controls.html" %}</div>
 </div>
 
 <div class="row g-3">
   <div class="col-12 col-xl-8">
-    <div class="card"><div class="card-header"><i class="bi bi-graph-up"></i> Power per zone (live, last 6 h of simulated time)</div>
-      <div class="card-body"><div id="chart-power" class="chart"></div></div></div>
+    <div class="card"><div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <span><i class="bi bi-graph-up"></i> Power use per zone <span class="hint">(live, last 6 simulated hours)</span></span>
+      <span class="hint" id="power-updated">—</span></div>
+      <div class="card-body"><div id="chart-power" class="chart"></div>
+        <p class="small text-muted mb-0">Each line is one zone; the dotted line is the whole building. Power rises when
+          people arrive and heating, cooling and lights switch on, and falls at night and at weekends.</p></div></div>
   </div>
   <div class="col-12 col-xl-4">
     <div class="card mb-3"><div class="card-header d-flex justify-content-between">
       <span><i class="bi bi-exclamation-triangle"></i> Latest alerts</span>
-      <a href="{{ url_for('pages.security') }}" class="small">all</a></div>
+      <a href="{{ url_for('pages.security') }}" class="small">all alerts</a></div>
       <ul class="list-group list-group-flush feed" id="alert-feed"><li class="list-group-item text-muted">No alerts yet</li></ul></div>
     <div class="card"><div class="card-header d-flex justify-content-between">
-      <span><i class="bi bi-robot"></i> Latest agent decision</span>
-      <a href="{{ url_for('pages.agent') }}" class="small">all</a></div>
+      <span><i class="bi bi-robot"></i> Latest AI agent decision</span>
+      <a href="{{ url_for('pages.agent') }}" class="small">all decisions</a></div>
       <div class="card-body small" id="latest-decision"><span class="text-muted">No decisions yet</span></div></div>
   </div>
 </div>

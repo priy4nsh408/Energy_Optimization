@@ -144,6 +144,21 @@ def _consistency(config) -> list[Check]:
     return checks
 
 
+def _external_data(config) -> list[Check]:
+    """Providers that need a key make external_data_publisher exit at once (and the stack give up)."""
+    from data_sources.factory import create_carbon_provider, create_weather_provider
+
+    checks = []
+    for name, create in (("weather provider", create_weather_provider), ("carbon provider", create_carbon_provider)):
+        try:
+            provider = create(config)
+            checks.append(Check(name, OK, provider.name + (" (synthetic data)" if provider.name == "mock" else "")))
+        except ConfigurationError as exc:
+            checks.append(Check(name, FAIL, str(exc), "set the API key in .env, set CARBON_PROVIDER=mock, or "
+                                                      "start with --mock-external (start.ps1 -MockExternal)"))
+    return checks
+
+
 def _dashboard(config) -> list[Check]:
     checks = []
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -160,7 +175,7 @@ def _dashboard(config) -> list[Check]:
     return checks
 
 
-CHECKS: list[Callable] = [_env_file, _packages, _consistency, _kafka, _database, _models, _dashboard]
+CHECKS: list[Callable] = [_env_file, _packages, _consistency, _external_data, _kafka, _database, _models, _dashboard]
 
 
 def run_checks() -> list[Check]:

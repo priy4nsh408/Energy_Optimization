@@ -19,7 +19,7 @@ def _render(template: str, **context):
                          for k, v in ATTACK_PARAMETERS.items()}
     return render_template(template, pages=PAGES, controls_enabled=config.DASHBOARD.controls_enabled,
                            building_id=config.SIMULATOR.building_id, attack_parameters=attack_parameters,
-                           max_attack_minutes=MAX_ATTACK_MINUTES,
+                           max_attack_minutes=MAX_ATTACK_MINUTES, control_mode=config.SYSTEM.control_mode,
                            zones=[(z.zone_id, z.name, z.zone_type) for z in default_zones()], **context)
 
 

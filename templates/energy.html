@@ -1,50 +1,89 @@
 {% extends "base.html" %}
 {% block title %}Energy Analytics{% endblock %}
 {% block content %}
-<div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
-  <h1 class="h4 mb-0"><i class="bi bi-lightning-charge"></i> Energy Analytics</h1>
-  <div class="d-flex align-items-center gap-2">
-    <label for="hours" class="small text-muted">Window (simulated hours)</label>
+<div class="d-flex flex-wrap justify-content-between align-items-end mb-2 gap-2">
+  <div class="page-head mb-0">
+    <h1><i class="bi bi-lightning-charge"></i> Energy analytics</h1>
+    <p class="lead-sm">How much energy the building uses, how much CO₂ that causes, how well the ML model predicts
+      it, and how much the optimizer saves.</p>
+  </div>
+  <div class="d-flex align-items-center gap-2 mb-1">
+    <label for="hours" class="small text-muted">Show the last</label>
     <select id="hours" class="form-select form-select-sm w-auto">
-      <option>6</option><option>12</option><option selected>24</option><option>48</option><option>168</option>
+      <option value="6">6 hours</option><option value="12">12 hours</option><option value="24" selected>24 hours</option>
+      <option value="48">2 days</option><option value="168">7 days</option>
     </select>
+    <span class="small text-muted">(simulated)</span>
   </div>
 </div>
+
+<details class="explain mt-2">
+  <summary>Key terms on this page</summary>
+  <ul>
+    <li><strong>kWh</strong> is energy (what you pay for); <strong>kW</strong> is power, the rate of use at a moment.</li>
+    <li><strong>CO₂e</strong> is the carbon emitted to produce that electricity: energy × the grid's carbon intensity
+      (grams of CO₂ per kWh), which comes from Electricity Maps or synthetic data.</li>
+    <li><strong>Baseline</strong> is the building's normal fixed schedule: set target temperatures and light levels by time of day.
+      <strong>Optimized</strong> is what the optimizer chooses: target temperatures and light levels that keep people
+      comfortable while using less energy.</li>
+  </ul>
+</details>
 
 <div class="row g-3 mb-3" id="energy-kpis"></div>
 
 <div class="row g-3 mb-3">
-  <div class="col-12 col-xl-7"><div class="card"><div class="card-header">Hourly energy consumption by zone (kWh)</div>
+  <div class="col-12 col-xl-7"><div class="card h-100"><div class="card-header"><i class="bi bi-bar-chart"></i> Energy used per hour, by zone <span class="hint">(kWh)</span></div>
     <div class="card-body"><div id="chart-hourly" class="chart"></div></div></div></div>
-  <div class="col-12 col-xl-5"><div class="card"><div class="card-header">Carbon emissions per hour (kg CO₂e)</div>
+  <div class="col-12 col-xl-5"><div class="card h-100"><div class="card-header"><i class="bi bi-cloud-haze2"></i> CO₂ emitted per hour <span class="hint">(kg CO₂e)</span></div>
     <div class="card-body"><div id="chart-carbon" class="chart"></div>
       <p class="small text-muted mb-0" id="carbon-note"></p></div></div></div>
 </div>
 
 <div class="row g-3 mb-3">
-  <div class="col-12 col-xl-8"><div class="card"><div class="card-header d-flex flex-wrap justify-content-between gap-2">
-      <span>Energy predictions vs. measured power (ML, next interval)</span>
-      <select id="pred-zone" class="form-select form-select-sm w-auto">
+  <div class="col-12 col-xl-8"><div class="card h-100"><div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <span><i class="bi bi-cpu"></i> ML prediction vs. reality</span>
+      <select id="pred-zone" class="form-select form-select-sm w-auto" aria-label="Zone">
         {% for id, name, type in zones %}<option value="{{ id }}">{{ id }} · {{ name }}</option>{% endfor %}
       </select></div>
-    <div class="card-body"><div id="chart-predictions" class="chart"></div></div></div></div>
-  <div class="col-12 col-xl-4"><div class="card h-100"><div class="card-header">Prediction accuracy (all stored predictions)</div>
+    <div class="card-body"><div id="chart-predictions" class="chart"></div>
+      <p class="small text-muted mb-0">The ML model (XGBoost) predicts each zone's power 5 minutes ahead. The closer the
+        dotted line follows the solid line, the better the prediction. The optimizer uses these predictions.</p></div></div></div>
+  <div class="col-12 col-xl-4"><div class="card h-100"><div class="card-header"><i class="bi bi-bullseye"></i> Prediction accuracy</div>
     <div class="card-body p-0"><div class="table-responsive"><table class="table table-sm mb-0">
-      <thead><tr><th>Zone</th><th>n</th><th>MAE kW</th><th>RMSE kW</th><th>Mean kW</th></tr></thead>
-      <tbody id="accuracy-table"><tr><td colspan="5" class="text-muted">—</td></tr></tbody></table></div></div></div></div>
+      <thead><tr><th>Zone</th><th>Predictions</th><th>Avg. error</th><th>Avg. power</th><th>Error %</th></tr></thead>
+      <tbody id="accuracy-table"><tr><td colspan="5" class="text-muted">—</td></tr></tbody></table></div>
+      <p class="small text-muted m-3">Average error (MAE) is how far a prediction is off, on average. Smaller is better.</p></div></div></div>
 </div>
 
+<h2 class="h5 mt-4 mb-2"><i class="bi bi-piggy-bank"></i> Does the optimizer save energy?</h2>
 <div class="row g-3">
-  <div class="col-12 col-xl-6"><div class="card"><div class="card-header">Baseline vs. optimized — measured closed-loop experiment</div>
-    <div class="card-body"><div id="chart-comparison" class="chart"></div>
+  <div class="col-12 col-xl-6"><div class="card h-100"><div class="card-header"><i class="bi bi-clipboard-data"></i> Measured experiment: one week, with and without the optimizer</div>
+    <div class="card-body">
+      <p class="small mb-2">The same simulated week was run twice, with <strong>identical weather and occupancy</strong>:
+        once on the normal schedule (<span class="text-secondary fw-semibold">baseline</span>) and once with the optimizer
+        controlling the zones (<span class="text-success fw-semibold">optimized</span>). These are <strong>measured</strong>
+        results from the simulation, not predictions.</p>
+      <div class="row g-2 mb-2" id="comparison-headline"></div>
+      <div id="chart-comparison" class="chart chart-sm"></div>
       <div class="table-responsive"><table class="table table-sm small mb-0">
-        <thead><tr><th>Case</th><th>Scenario</th><th>kWh</th><th>Saving</th><th>kg CO₂e</th><th>Comfort</th><th>Peak kW</th></tr></thead>
+        <thead><tr><th>Week</th><th>Run</th><th>Energy</th><th>Saving</th><th>CO₂e</th><th>Comfortable</th><th>Peak</th></tr></thead>
         <tbody id="comparison-table"><tr><td colspan="7" class="text-muted">—</td></tr></tbody></table></div>
-      <p class="small text-muted mb-0" id="comparison-note"></p></div></div></div>
-  <div class="col-12 col-xl-6"><div class="card"><div class="card-header">Baseline vs. optimized — live optimizer decisions (predicted power)</div>
-    <div class="card-body"><div id="chart-optimizer" class="chart"></div>
-      <p class="small text-muted mb-0">Average predicted building power per hour for approved optimizer decisions:
-        baseline setpoints vs. the optimizer's choice (model predictions, not measurements).</p></div></div></div>
+      <p class="small text-muted mb-0 mt-2" id="comparison-note"></p></div></div></div>
+  <div class="col-12 col-xl-6"><div class="card h-100"><div class="card-header d-flex justify-content-between align-items-center">
+      <span><i class="bi bi-broadcast"></i> Live optimizer: what it would save now</span><span id="mode-badge"></span></div>
+    <div class="card-body">
+      <p class="small mb-2">Every 15 simulated minutes the optimizer picks a target temperature and light level for each
+        zone. It asks the ML model for the expected power with the <strong>normal schedule</strong> and with
+        <strong>its own choice</strong>. The chart compares the two. These are <strong>predictions</strong>.</p>
+      <div class="row g-2 mb-2" id="live-headline"></div>
+      <div id="chart-optimizer" class="chart chart-sm"></div>
+      <div class="alert alert-light border small mb-0 mt-2" id="mode-help"></div>
+    </div></div></div>
 </div>
+
+<div class="card mt-3"><div class="card-header"><i class="bi bi-list-task"></i> Latest optimizer recommendations</div>
+  <div class="card-body p-0"><div class="table-responsive"><table class="table table-hover mb-0 small">
+    <thead><tr><th>When (sim.)</th><th>Zone</th><th>Recommendation</th><th>Predicted power: normal → optimized</th><th>Status</th></tr></thead>
+    <tbody id="optimizer-table"><tr><td colspan="5" class="text-muted">Loading…</td></tr></tbody></table></div></div></div>
 {% endblock %}
 {% block scripts %}<script src="{{ url_for('static', filename='js/energy.js') }}"></script>{% endblock %}

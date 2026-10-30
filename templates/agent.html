@@ -1,33 +1,55 @@
 {% extends "base.html" %}
-{% block title %}Agentic AI Activity{% endblock %}
+{% block title %}AI Agent{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='css/agent.css') }}">{% endblock %}
 {% block content %}
-<h1 class="h4 mb-3"><i class="bi bi-robot"></i> Agentic AI Activity</h1>
-<div class="row g-3 mb-3">
-  <div class="col-12 col-lg-5"><div class="card h-100"><div class="card-header">Actions by source and outcome (log scale)</div>
-    <div class="card-body"><div id="chart-actions" class="chart chart-sm"></div></div></div></div>
-  <div class="col-12 col-lg-7"><div class="card h-100"><div class="card-header">How decisions are made</div>
-    <div class="card-body small">
-      <ol class="mb-2">
-        <li>An alert arrives → the agent gathers sensor, energy, weather/carbon data and re-runs the detectors (tools).</li>
-        <li>It diagnoses the cause and explains the energy and operational impact.</li>
-        <li>It <em>proposes</em> actions; a deterministic <strong>safety validator</strong> approves or rejects each one.</li>
-        <li>Only approved actions run — on the <strong>simulator</strong> — and everything is recorded.</li>
-      </ol>
-      <p class="mb-0 text-muted">Provider <code>offline</code> = deterministic rule-based playbook (no LLM);
-        <code>anthropic</code> = Claude. If the LLM fails, the record shows the fallback.</p>
-    </div></div></div>
+<div class="page-head">
+  <h1><i class="bi bi-robot"></i> AI security agent</h1>
+  <p class="lead-sm">When a detector raises an alert, the AI agent investigates it like a security analyst would:
+    it checks the data, decides whether the alert is a real attack, and takes safe corrective action.</p>
 </div>
 
-<div class="card mb-3"><div class="card-header">Agent explanations (latest first)</div>
+<div class="card mb-3"><div class="card-body">
+  <div class="flow">
+    <div class="flow-step"><div class="flow-icon bg-grad-red"><i class="bi bi-bell-fill"></i></div>
+      <strong>1. Alert</strong><span>A detector flags suspicious readings in a zone.</span></div>
+    <div class="flow-step"><div class="flow-icon bg-grad-blue"><i class="bi bi-search"></i></div>
+      <strong>2. Investigate</strong><span>The agent reads recent sensor, energy, weather and carbon data and re-runs the detectors.</span></div>
+    <div class="flow-step"><div class="flow-icon bg-grad-purple"><i class="bi bi-clipboard2-pulse"></i></div>
+      <strong>3. Diagnose</strong><span>Real attack or false alarm? It explains the cause and the energy impact.</span></div>
+    <div class="flow-step"><div class="flow-icon bg-grad-orange"><i class="bi bi-shield-check"></i></div>
+      <strong>4. Safety check</strong><span>Fixed rules approve or block every proposed action. The AI cannot skip this.</span></div>
+    <div class="flow-step"><div class="flow-icon bg-grad-green"><i class="bi bi-gear-wide-connected"></i></div>
+      <strong>5. Act &amp; record</strong><span>Approved actions run on the simulated building; everything is saved.</span></div>
+  </div>
+  <p class="small text-muted mb-0 mt-3" id="provider-note">Agent mode: —</p>
+</div></div>
+
+<div class="row g-3 mb-3" id="agent-kpis"></div>
+
+<div class="row g-3 mb-3">
+  <div class="col-12 col-lg-4"><div class="card h-100"><div class="card-header"><i class="bi bi-pie-chart"></i> What the agent concluded</div>
+    <div class="card-body"><div id="chart-verdicts" class="chart chart-sm"></div></div></div></div>
+  <div class="col-12 col-lg-8"><div class="card h-100"><div class="card-header"><i class="bi bi-book"></i> What the verdicts mean</div>
+    <div class="card-body"><div class="legend-grid" id="verdict-legend"></div></div></div></div>
+</div>
+
+<div class="card mb-3"><div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+  <span><i class="bi bi-journal-text"></i> Investigations <span class="hint">(newest first)</span></span>
+  <div class="btn-group btn-group-sm" role="group" aria-label="Filter investigations" id="verdict-filter">
+    <button type="button" class="btn btn-outline-secondary active" data-kind="">All</button>
+    <button type="button" class="btn btn-outline-danger" data-kind="attack">Attacks</button>
+    <button type="button" class="btn btn-outline-success" data-kind="false_alarm">False alarms</button>
+    <button type="button" class="btn btn-outline-secondary" data-kind="other">Other</button>
+  </div></div>
   <div class="card-body" id="decision-list"><p class="text-muted mb-0">Loading…</p></div></div>
 
-<div class="card"><div class="card-header d-flex flex-wrap justify-content-between gap-2">
-  <span>Corrective action history</span>
-  <select id="filter-source" class="form-select form-select-sm w-auto">
-    <option value="">all sources</option><option value="agent" selected>agent</option><option>optimizer</option><option>operator</option>
+<div class="card"><div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+  <span><i class="bi bi-list-check"></i> Action history <span class="hint">(every change made to the building)</span></span>
+  <select id="filter-source" class="form-select form-select-sm w-auto" aria-label="Who proposed the action">
+    <option value="">everyone</option><option value="agent" selected>AI agent</option><option value="optimizer">energy optimizer</option><option value="operator">operator</option>
   </select></div>
-  <div class="card-body p-0"><div class="table-responsive"><table class="table table-sm table-hover mb-0 small">
-    <thead><tr><th>Updated</th><th>Zone</th><th>Source</th><th>Action</th><th>Parameters</th><th>Status</th><th>Reason</th><th>Safety validator</th></tr></thead>
-    <tbody id="action-table"><tr><td colspan="8" class="text-muted">Loading…</td></tr></tbody></table></div></div></div>
+  <div class="card-body p-0"><div class="table-responsive"><table class="table table-hover mb-0 small">
+    <thead><tr><th>When (sim.)</th><th>Zone</th><th>Who</th><th>What</th><th>Safety check</th><th>Result</th></tr></thead>
+    <tbody id="action-table"><tr><td colspan="6" class="text-muted">Loading…</td></tr></tbody></table></div></div></div>
 {% endblock %}
 {% block scripts %}<script src="{{ url_for('static', filename='js/agent.js') }}"></script>{% endblock %}

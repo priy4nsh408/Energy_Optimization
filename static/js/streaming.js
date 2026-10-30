@@ -103,12 +103,17 @@ const App = (() => {
   }
 
   // -- simulation controls ---------------------------------------------------------------
+  const PARAM_LABELS = {offset_c: "fake offset (°C)", rate_c_per_h: "drift speed (°C per hour)",
+                        max_offset_c: "maximum offset (°C)", count: "fake people count", factor: "power multiplier",
+                        lag: "replay delay (readings)"};
   function renderParams() {
     const type = document.getElementById("attack-type").value;
     const params = (window.DASHBOARD.attackParameters || {})[type] || {};
     const defaults = {offset_c: 4, rate_c_per_h: 0.5, max_offset_c: 6, count: 25, factor: 3, lag: 288};
     const container = document.getElementById("attack-params");
     container.innerHTML = "";
+    const help = document.getElementById("attack-help");
+    if (help && typeof Glossary !== "undefined") help.textContent = Glossary.classification(type).plain;
     Object.entries(params).forEach(([name, rule]) => {
       const col = document.createElement("div");
       col.className = "col-6 col-sm-4";
@@ -122,7 +127,8 @@ const App = (() => {
         input = `<input class="form-control form-control-sm" type="number" id="${id}" data-param="${name}"
                   min="${rule[0]}" max="${rule[1]}" step="${step}" value="${defaults[name] ?? rule[0]}">`;
       }
-      col.innerHTML = `<label class="form-label small mb-0" for="${id}">${escapeHtml(fmt.label(name))}</label>${input}`;
+      const label = PARAM_LABELS[name] || fmt.label(name);
+      col.innerHTML = `<label class="form-label small mb-0" for="${id}">${escapeHtml(label)}</label>${input}`;
       container.appendChild(col);
     });
   }

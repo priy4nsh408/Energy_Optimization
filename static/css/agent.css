@@ -1,0 +1,29 @@
+/* AI agent page: process flow, investigation cards. */
+.flow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1rem; position: relative; }
+.flow-step { display: flex; flex-direction: column; align-items: center; text-align: center; gap: .3rem; font-size: .85rem;
+             position: relative; }
+.flow-step span { color: var(--sb-muted); font-size: .8rem; }
+.flow-icon { flex: 0 0 auto; width: 3rem; height: 3rem; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 1.3rem;
+             box-shadow: 0 4px 10px rgba(15, 23, 42, .15); }
+.flow-step:not(:last-child)::after { content: "\F138"; font-family: "bootstrap-icons"; position: absolute; right: -.85rem;
+                                     top: .85rem; color: #94a3b8; font-size: 1.1rem; }
+@media (max-width: 768px) {
+  .flow { grid-template-columns: 1fr; }
+  .flow-step { display: grid; grid-template-columns: 3rem 1fr; column-gap: .75rem; row-gap: 0; text-align: left;
+               align-items: center; }
+  .flow-icon { grid-row: span 2; }
+  .flow-step:not(:last-child)::after { display: none; }
+}
+
+.investigation { border: 1px solid var(--sb-line); border-left: 5px solid var(--verdict, #94a3b8); border-radius: 12px;
+                 padding: 1rem 1.1rem; margin-bottom: 1rem; background: #fff; }
+.investigation .story { font-size: .95rem; margin: .5rem 0 .8rem; }
+.investigation h6 { font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: var(--sb-muted); margin-bottom: .4rem; }
+.investigation .checklist { list-style: none; padding: 0; margin: 0; font-size: .83rem; }
+.investigation .checklist li { padding: .12rem 0; }
+.investigation .checklist .bi { color: var(--sb-primary); margin-right: .35rem; }
+.investigation .act { display: flex; gap: .5rem; align-items: flex-start; font-size: .83rem; padding: .3rem 0; }
+.investigation .act .bi { font-size: 1rem; }
+.investigation details { font-size: .8rem; margin-top: .6rem; }
+.investigation details summary { cursor: pointer; color: var(--sb-muted); }
+.investigation dl { margin: .5rem 0 0; }

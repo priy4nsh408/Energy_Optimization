@@ -1,4 +1,8 @@
 /* Security page. */
-.evidence { font-size: .75rem; color: #495057; }
-.drift-kind-security { color: #dc3545; }
-.drift-kind-data { color: #6f42c1; }
+.evidence { font-size: .78rem; color: #475569; min-width: 16rem; }
+.scroll-table { max-height: 640px; overflow-y: auto; }
+.scroll-table thead th { position: sticky; top: 0; background: #fff; z-index: 1; }
+.band { display: inline-block; width: .8rem; height: .8rem; border-radius: 3px; vertical-align: -1px; margin-right: .2rem; }
+.band-ok { background: #dcfce7; border: 1px solid #86efac; }
+.band-warn { background: #fef3c7; border: 1px solid #fcd34d; }
+.band-bad { background: #fee2e2; border: 1px solid #fca5a5; }

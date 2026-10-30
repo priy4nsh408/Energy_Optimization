@@ -228,8 +228,8 @@ def client_factory(clean_env):
 
 
 class TestFlaskDashboard:
-    @pytest.mark.parametrize("path, text", [("/", "Live sensor readings"), ("/energy", "Energy predictions"),
-                                            ("/security", "Simulated attacks"), ("/agent", "Agent explanations")])
+    @pytest.mark.parametrize("path, text", [("/", "Live sensor readings"), ("/energy", "ML prediction vs. reality"),
+                                            ("/security", "Simulated attacks"), ("/agent", "Investigations")])
     def test_pages_render(self, client_factory, path, text):
         response = client_factory().get(path)
         html = response.get_data(as_text=True)

@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from config import BASE_DIR, ConfigurationError, SystemSettings
+from config import BASE_DIR, ConfigurationError, SystemSettings, get_config
 
 PACKAGES = ("agent", "data_sources", "database", "experiments", "ml", "optimization", "processors", "routes",
             "scripts", "security", "services", "simulator", "streaming", "utils", "workers")
@@ -150,6 +150,39 @@ class TestSystemSettings:
         clean_env.setenv("CONTROL_MODE", "autopilot")
         results = run_checks()
         assert results[0].status == "fail" and "CONTROL_MODE" in results[0].detail
+
+
+def test_preflight_fails_when_a_provider_needs_a_missing_key(clean_env):
+    from scripts.preflight import _external_data
+
+    clean_env.setenv("CARBON_PROVIDER", "electricitymaps")
+    clean_env.setenv("ELECTRICITY_MAPS_API_KEY", "")
+    carbon = {c.name: c for c in _external_data(get_config("testing", load_dotenv_file=False))}["carbon provider"]
+    assert carbon.status == "fail" and "CARBON_PROVIDER=mock" in carbon.fix
+    clean_env.setenv("CARBON_PROVIDER", "mock")
+    carbon = {c.name: c for c in _external_data(get_config("testing", load_dotenv_file=False))}["carbon provider"]
+    assert carbon.status == "ok"
+
+
+@pytest.mark.postgres
+def test_run_stack_continues_after_stored_data(db, monkeypatch):
+    from scripts import run_stack
+
+    monkeypatch.setattr("config.get_config", lambda *a, **k: SimpleNamespace(DATABASE=db.settings))
+    assert run_stack.continue_after_stored_data(300) == run_stack.DEFAULT_START          # empty database
+    from config import SimulatorSettings
+    from database.repositories import insert_record
+    from processors.data_validator import validate_sensor_event
+    from simulator.engine import BuildingSimulator
+
+    sim = BuildingSimulator(SimulatorSettings(interval_seconds=1, speed_factor=300, random_seed=1,
+                                              start_time=datetime(2026, 2, 10, 9, tzinfo=timezone.utc)))
+    records = [validate_sensor_event(e) for _ in range(2) for e in sim.tick()]
+    with db.transaction() as conn:
+        for record in records:
+            insert_record(conn, record)
+    latest = max(r.event_time for r in records)
+    assert run_stack.continue_after_stored_data(300) == (latest + timedelta(seconds=300)).isoformat()
 
 
 # --------------------------------------------------------------------------- supervisor
