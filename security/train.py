@@ -42,6 +42,9 @@ from utils.logging_config import configure_logging
 logger = logging.getLogger(__name__)
 
 ARTIFACT_ROOT = BASE_DIR / "security" / "artifacts"
+# Detectors trained on optimizer-controlled data (experiments.evaluation); used in closed-loop mode.
+OPTIMIZER_CONTROL_ROOT = ARTIFACT_ROOT / "optimizer_control"
+DETECTOR_ROOTS = {"baseline": ARTIFACT_ROOT, "optimizer_control": OPTIMIZER_CONTROL_ROOT}
 TRAIN_FRACTION = 0.75
 MAX_DRIFT_FALSE_ALARM_RATE = 0.02
 
@@ -50,11 +53,38 @@ class SecurityModelNotFoundError(FileNotFoundError):
     pass
 
 
-def simulate_clean_readings(days: float, seed: int, start: datetime) -> list[SensorReadingRecord]:
+def simulate_clean_readings(days: float, seed: int, start: datetime,
+                            control: str = "baseline") -> list[SensorReadingRecord]:
+    """Clean (attack-free) readings; ``control="optimizer"`` lets the Module 7 optimizer
+    control the building (measured basis), as in closed-loop operation."""
     simulator = BuildingSimulator(SimulatorSettings(interval_seconds=1, speed_factor=300,
                                                     random_seed=seed, start_time=start))
     ticks = int(days * 86400 / 300)
-    return [validate_sensor_event(e) for _ in range(ticks) for e in simulator.tick()]
+    if control == "baseline":
+        return [validate_sensor_event(e) for _ in range(ticks) for e in simulator.tick()]
+    from config import get_config as _config
+    from data_sources.carbon import MockCarbonProvider
+    from optimization.hvac_optimizer import ZoneConditions, building_models
+    from optimization.lighting_optimizer import is_lighting_short
+    from optimization.optimizer import DecisionScheduler, ZoneOptimizer
+
+    settings = _config().OPTIMIZATION
+    optimizer = ZoneOptimizer(settings, building_models())
+    scheduler = DecisionScheduler(settings.decision_interval_s)
+    carbon = MockCarbonProvider().value_at
+    readings = []
+    for _ in range(ticks):
+        for event in simulator.tick():
+            reading = validate_sensor_event(event)
+            readings.append(reading)
+            conditions = ZoneConditions.from_reading(reading)
+            short = is_lighting_short(optimizer.models[reading.zone_id], conditions)
+            if scheduler.due(reading.zone_id, reading.event_time, reading.occupancy_count, short):
+                decision = optimizer.optimize(conditions, carbon_intensity=carbon(reading.event_time))
+                if decision.approved:
+                    simulator.apply_command(reading.zone_id, setpoint_c=decision.setpoint_c,
+                                            lighting_level=decision.lighting_level)
+    return readings
 
 
 def load_db_readings(start: datetime | None, end: datetime | None) -> list[SensorReadingRecord]:
@@ -166,6 +196,14 @@ def load_models(version: str | None = None, root: Path = ARTIFACT_ROOT) -> Secur
     return joblib.load(path)
 
 
+def load_configured_models(config) -> SecurityModels:
+    """The detector set that matches ``config.SYSTEM`` (one place, so all services agree)."""
+    system = config.SYSTEM
+    models = load_models(system.security_detector_version, root=DETECTOR_ROOTS[system.detector_set])
+    models.metadata.setdefault("detector_set", system.detector_set)
+    return models
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m security.train", description=__doc__.splitlines()[0])
     parser.add_argument("--source", choices=["simulator", "db"], default="simulator")
@@ -173,18 +211,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--start", type=datetime.fromisoformat, default=datetime(2026, 1, 5, tzinfo=timezone.utc))
     parser.add_argument("--end", type=datetime.fromisoformat)
-    parser.add_argument("--artifacts", type=Path, default=ARTIFACT_ROOT)
+    parser.add_argument("--control", choices=["baseline", "optimizer"], default="baseline",
+                        help="simulator: who controls the building while clean data is recorded "
+                             "(optimizer = closed-loop detectors, saved to the optimizer_control set)")
+    parser.add_argument("--artifacts", type=Path, help="default: the set matching --control")
     args = parser.parse_args(argv)
+    if args.artifacts is None:
+        args.artifacts = OPTIMIZER_CONTROL_ROOT if args.control == "optimizer" else ARTIFACT_ROOT
     config = get_config()
     configure_logging(config.LOGGING, "security_train", stream=sys.stderr)
 
     if args.source == "simulator":
-        readings = simulate_clean_readings(args.days, args.seed, args.start)
-        source = {"type": "simulator", "days": args.days, "seed": args.seed, "start": args.start.isoformat()}
+        readings = simulate_clean_readings(args.days, args.seed, args.start, args.control)
+        source = {"type": "simulator", "control": args.control, "days": args.days, "seed": args.seed,
+                  "start": args.start.isoformat()}
     else:
         readings = load_db_readings(args.start, args.end)
         source = {"type": "postgresql:sensor_readings", "start": str(args.start), "end": str(args.end)}
     models = train_models(readings, source=source)
+    args.artifacts.mkdir(parents=True, exist_ok=True)
     directory = save_models(models, args.artifacts)
     print(json.dumps({k: models.metadata[k] for k in ("version", "readings", "start", "end",
                                                        "isolation_forest_thresholds")}, indent=2))

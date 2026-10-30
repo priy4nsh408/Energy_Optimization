@@ -20,7 +20,7 @@ from confluent_kafka import KafkaException
 
 from config import ConfigurationError, get_config
 from security.monitor import SecurityMonitor
-from security.train import SecurityModelNotFoundError, load_models
+from security.train import SecurityModelNotFoundError, load_configured_models
 from streaming.consumer import ConsumedMessage, JsonConsumer, KafkaConsumerFatalError
 from streaming.kafka_config import KafkaUnavailableError, create_admin_client, wait_for_broker
 from streaming.producer import JsonProducer
@@ -75,7 +75,7 @@ def main(argv: list[str] | None = None, stop_event: threading.Event | None = Non
         stop_event = threading.Event()
         install_shutdown_handlers(stop_event)
     try:
-        models = load_models()
+        models = load_configured_models(config)
         wait_for_broker(config.KAFKA, timeout_s=args.broker_wait)
         ensure_topics(create_admin_client(config.KAFKA), config.KAFKA)
     except SecurityModelNotFoundError as exc:
@@ -89,7 +89,9 @@ def main(argv: list[str] | None = None, stop_event: threading.Event | None = Non
     handler = SecurityHandler(SecurityMonitor(models), producer, logger)
     consumer = JsonConsumer(config.KAFKA, SERVICE, [BUILDING_SENSOR_DATA],
                             auto_offset_reset="earliest" if args.from_beginning else "latest")
-    logger.info("Security service started", extra={"detectors": models.metadata.get("version")})
+    logger.info("Security service started", extra={"detectors": models.metadata.get("version"),
+                                                   "detector_set": config.SYSTEM.detector_set,
+                                                   "control_mode": config.SYSTEM.control_mode})
     try:
         consumer.run(handler, stop_event=stop_event, max_messages=args.max_messages,
                      idle_timeout_s=args.idle_timeout)

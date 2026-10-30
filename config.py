@@ -595,6 +595,60 @@ class AgentSettings:
 
 
 @dataclass(frozen=True)
+class SystemSettings:
+    """How the services work together.
+
+    ``control_mode``:
+      * ``advisory`` - the building runs its own schedule; optimizer commands are
+        recommendations (published and shown, not executed). Only agent actions
+        are executed in the simulator.
+      * ``closed_loop`` - the simulator also executes the optimizer's approved
+        commands, so optimizer -> building -> readings -> ML -> optimizer is a
+        real feedback loop. Zones with an isolated temperature/occupancy sensor
+        are not optimized.
+
+    ``security_detectors``: ``auto`` picks the detector set that matches the
+    control mode (Module 11: detectors are specific to the control regime):
+    ``baseline`` (security/artifacts) for advisory, ``optimizer_control``
+    (security/artifacts/optimizer_control, trained by experiments.evaluation)
+    for closed loop. ``security_detector_version`` pins a version.
+    """
+
+    CONTROL_MODES: ClassVar[tuple[str, ...]] = ("advisory", "closed_loop")
+    DETECTOR_SETS: ClassVar[tuple[str, ...]] = ("auto", "baseline", "optimizer_control")
+
+    control_mode: str = "advisory"
+    security_detectors: str = "auto"
+    security_detector_version: str | None = None
+    recovery_interval_s: float = 30.0          # agent service: how often isolated sensors are re-checked
+
+    def __post_init__(self) -> None:
+        if self.control_mode not in self.CONTROL_MODES:
+            raise ConfigurationError(f"CONTROL_MODE must be one of {list(self.CONTROL_MODES)}.")
+        if self.security_detectors not in self.DETECTOR_SETS:
+            raise ConfigurationError(f"SECURITY_DETECTORS must be one of {list(self.DETECTOR_SETS)}.")
+
+    @property
+    def detector_set(self) -> str:
+        if self.security_detectors != "auto":
+            return self.security_detectors
+        return "optimizer_control" if self.control_mode == "closed_loop" else "baseline"
+
+    @property
+    def executed_command_sources(self) -> tuple[str, ...]:
+        return ("agent", "optimizer") if self.control_mode == "closed_loop" else ("agent",)
+
+    @classmethod
+    def from_env(cls) -> "SystemSettings":
+        return cls(
+            control_mode=_get_str("CONTROL_MODE", "advisory").lower(),
+            security_detectors=_get_str("SECURITY_DETECTORS", "auto").lower(),
+            security_detector_version=_get_str("SECURITY_DETECTOR_VERSION", "") or None,
+            recovery_interval_s=_get_float("AGENT_RECOVERY_INTERVAL_S", 30.0, minimum=1, maximum=3600),
+        )
+
+
+@dataclass(frozen=True)
 class DashboardSettings:
     """Flask dashboard: live-update polling and simulation controls.
 
@@ -662,6 +716,7 @@ class BaseConfig:
         self.EXTERNAL_DATA = ExternalDataSettings.from_env()
         self.OPTIMIZATION = OptimizationSettings.from_env()
         self.AGENT = AgentSettings.from_env()
+        self.SYSTEM = SystemSettings.from_env()
         self.DASHBOARD = DashboardSettings.from_env(default_controls=self.ENV_NAME != "production")
         self.LOGGING = LoggingSettings.from_env(
             default_level=self.DEFAULT_LOG_LEVEL,
@@ -689,6 +744,8 @@ class BaseConfig:
             "database": self.DATABASE.safe_dsn,
             "weather_provider": self.EXTERNAL_DATA.weather_provider,
             "carbon_provider": self.EXTERNAL_DATA.carbon_provider,
+            "control_mode": self.SYSTEM.control_mode,
+            "security_detectors": self.SYSTEM.detector_set,
             "agent_llm": f"{self.AGENT.resolved_provider}"
                          + (f" ({self.AGENT.llm_model})" if self.AGENT.resolved_provider == "anthropic" else ""),
             "simulator": (f"{self.SIMULATOR.building_id} every {self.SIMULATOR.interval_seconds}s"

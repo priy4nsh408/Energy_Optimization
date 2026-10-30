@@ -262,7 +262,7 @@ def test_attack_to_alert_flow_through_kafka(db, fresh_kafka, clean_env, models, 
     import workers.security_service as service
     from workers import record_persistence, sensor_publisher
 
-    monkeypatch.setattr(service, "load_models", lambda: models)
+    monkeypatch.setattr(service, "load_configured_models", lambda config: models)
     labels = tmp_path / "labels.jsonl"
     assert sensor_publisher.main(["--fast", "--interval", "1", "--speed", "300", "--ticks", "48",
                                   "--seed", "5", "--start", "2026-01-12T09:00",

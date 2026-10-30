@@ -76,6 +76,9 @@ if __name__ == "__main__":
         host=cfg.FLASK_HOST,
         port=cfg.FLASK_PORT,
         debug=cfg.DEBUG,
+        # No auto-reloader: it forks a second process (two live-update pollers, and a child that
+        # survives when a supervisor stops the parent).
+        use_reloader=False,
         # The built-in server is fine for local use; production needs a real WSGI server.
         allow_unsafe_werkzeug=cfg.ENV_NAME != "production",
     )

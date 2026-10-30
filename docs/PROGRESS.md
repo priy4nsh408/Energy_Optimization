@@ -4,7 +4,7 @@ Status of *Smart Building Energy Optimization Using Real-Time Streaming, Cyberse
 Use this file to continue the work later, alone or in a new Claude session.
 
 - **Branch:** `claude/nifty-brown-uckrlo`
-- **Last completed module:** 11 (experimental evaluation) — all planned modules are done
+- **Last completed module:** 12 (complete system integration), verified end to end in both control modes
 - **Tests:** 374 passed, with Docker running and the three datasets in `data/raw/`.
 
 ## Module status
@@ -22,6 +22,7 @@ Use this file to continue the work later, alone or in a new Claude session.
 | 9 | Agentic AI (LangGraph) + safety layer + simulated execution | ✅ | see git log | `agent/`, `python -m agent.demo`, `workers.agent_service`, `workers.sensor_publisher --apply-commands` |
 | 10 | Flask web dashboard | ✅ | see git log | `app.py`, `routes/`, `services/`, `templates/`, `static/`, `workers.simulation_manager`, `python -m scripts.run_stack` |
 | 11 | Experimental evaluation | ✅ | see git log | `python -m experiments.evaluation`, `experiments.streaming_latency`, `experiments.evaluation_report`; results in `docs/results/evaluation/` |
+| 12 | Complete system integration | ✅ | see git log | `scripts/windows/*.bat`, `python -m scripts.bootstrap`, `scripts.preflight`, `scripts.run_stack`, `scripts.verify_system`; `docs/ARCHITECTURE.md`, `docs/EXECUTION_GUIDE.md` |
 
 Measured results are in `docs/results/` and summarised in `README.md`.
 
@@ -36,6 +37,9 @@ The results are in the README section *Real data: drift and anomaly detection on
 `RollingDriftDetector` is in `security/drift_detector.py`.
 
 ## Resume on a new machine (Windows)
+
+The short way is `scripts\windows\setup.bat` and then `scripts\windows\start.bat`. See
+`docs/EXECUTION_GUIDE.md` for details. The manual steps follow.
 
 These commands assume PowerShell in the project root.
 
@@ -106,6 +110,14 @@ These are git-ignored, either because they are large or because they are generat
   - Windows are anchored on the most recently stored data. Do not reuse the same `--start` dates in
     one database for separate runs.
   - `python -m scripts.run_stack --mock-external` starts everything.
+- **Integration (Module 12).**
+  - `CONTROL_MODE=advisory|closed_loop` decides which command sources the simulator executes. The
+    detectors follow the mode (`SECURITY_DETECTORS=auto`).
+  - The optimizer mirrors the agent's quarantine via `agent_actions`.
+  - The agent service runs the recovery policy and rebuilds the quarantine from PostgreSQL at
+    start-up.
+  - Only one simulation manager per building (heartbeat guard).
+  - Verify everything with `python -m scripts.verify_system --launch`.
 - **Security.** Point anomalies (one reading) are kept separate from drift (a window).
   *Security drift* is distinct from *data drift*. Thresholds are calibrated only on clean data.
 - **Honest evaluation.** Results are never tuned on test data. When a held-out week revealed

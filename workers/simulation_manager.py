@@ -6,9 +6,14 @@ Like ``workers.sensor_publisher``, but long-running and remote-controlled:
   ``stop`` (pause; simulated time stands still) and ``attack`` (inject a
   simulated attack into one zone, starting at the next reading);
 * publishes readings to ``building_sensor_data`` while running;
-* applies *approved* agent commands from ``optimization_commands`` to the
-  simulator (as ``sensor_publisher --apply-commands``; disable with
-  ``--no-apply-commands``) and reports ``executed``/``failed`` on ``agent_actions``;
+* applies *approved* commands from ``optimization_commands`` to the simulator
+  and reports ``executed``/``failed`` on ``agent_actions``. Which sources are
+  executed follows ``CONTROL_MODE``: ``agent`` (advisory) or ``agent`` and
+  ``optimizer`` (closed loop); override with ``--command-sources`` or disable
+  with ``--no-apply-commands``;
+* refuses to start while another manager for the same building is alive
+  (fresh heartbeat in ``simulation_status``), so readings are never published
+  twice;
 * writes its state and the simulated attacks to PostgreSQL
   (``simulation_status``, ``simulated_attacks``) so the dashboard can show them.
 
@@ -177,13 +182,30 @@ class SimulationManager:
         self._dirty_attacks.clear()
 
 
+HEARTBEAT_STALE_S = 15.0
+
+
+def _live_manager(database, building_id: str) -> float | None:
+    """Heartbeat age (s) of another running manager for the building, or None."""
+    with database.transaction() as conn:
+        row = conn.execute("SELECT state, extract(epoch FROM now() - updated_at) FROM simulation_status "
+                           "WHERE building_id = %s", (building_id,)).fetchone()
+    if row and row[0] != "stopped" and row[1] is not None and row[1] < HEARTBEAT_STALE_S:
+        return float(row[1])
+    return None
+
+
 def main(argv: list[str] | None = None, stop_event: threading.Event | None = None) -> int:
     parser = argparse.ArgumentParser(prog=f"python -m workers.{SERVICE}",
                                      description="Controllable building simulation for the dashboard.")
     add_simulation_arguments(parser)
     parser.add_argument("--autostart", action="store_true", help="start running immediately")
     parser.add_argument("--no-apply-commands", action="store_true",
-                        help="do not execute approved agent commands in the simulator")
+                        help="do not execute approved commands in the simulator")
+    parser.add_argument("--command-sources",
+                        help="comma-separated sources to execute (default from CONTROL_MODE)")
+    parser.add_argument("--force", action="store_true",
+                        help="start even if another manager for this building looks alive")
     parser.add_argument("--no-db", action="store_true", help="do not write status to PostgreSQL")
     parser.add_argument("--broker-wait", type=float, default=60.0)
     args = parser.parse_args(argv)
@@ -213,6 +235,12 @@ def main(argv: list[str] | None = None, stop_event: threading.Event | None = Non
             database.open()
             database.require_schema()
             store = PostgresStatusStore(database, logger)
+            other = _live_manager(database, settings.building_id)
+            if other and not args.force:
+                logger.error("Another simulation manager is running for this building; not starting "
+                             "(use --force if it is stale)", extra={"heartbeat_age_s": other})
+                database.close()
+                return 1
         except (DatabaseUnavailableError, RuntimeError) as exc:
             logger.warning("Status will not be stored in PostgreSQL", extra={"error": str(exc)})
             database.close()
@@ -229,7 +257,9 @@ def main(argv: list[str] | None = None, stop_event: threading.Event | None = Non
     if not args.no_apply_commands:
         from agent.executor import SimulatorActuator
 
-        actuator = SimulatorActuator(simulator, producer, AGENT_ACTIONS, {"agent"})
+        sources = ({s.strip() for s in args.command_sources.split(",") if s.strip()} if args.command_sources
+                   else set(config.SYSTEM.executed_command_sources))
+        actuator = SimulatorActuator(simulator, producer, AGENT_ACTIONS, sources)
         consumer = JsonConsumer(config.KAFKA, f"{SERVICE}_actuator", [OPTIMIZATION_COMMANDS],
                                 auto_offset_reset="latest")
         consumers.append((consumer, threading.Thread(target=consumer.run, args=(actuator.handle,),
@@ -249,8 +279,9 @@ def main(argv: list[str] | None = None, stop_event: threading.Event | None = Non
                                                 kwargs={"stop_event": stop_event}, daemon=True)))
     for _, thread in consumers:
         thread.start()
-    logger.info("Simulation manager started", extra={"building_id": manager.building_id,
-                                                      "running": manager.running, "apply_commands": bool(actuator)})
+    logger.info("Simulation manager started", extra={
+        "building_id": manager.building_id, "running": manager.running, "control_mode": config.SYSTEM.control_mode,
+        "executed_sources": sorted(actuator.sources) if actuator else []})
     last_status = 0.0
     try:
         while not stop_event.is_set() and (args.ticks is None or manager.ticks < args.ticks):

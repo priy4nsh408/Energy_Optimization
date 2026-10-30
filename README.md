@@ -8,19 +8,34 @@ optimise HVAC and lighting, and detect cyberattacks, anomalies and data drift. A
 proposes corrective actions, and every action must pass a deterministic safety layer before it
 is executed. A Flask + Socket.IO dashboard shows everything live.
 
+## Quick start (Windows)
+
+```powershell
+scripts\windows\setup.bat     # once: .venv, packages, .env (if missing), Docker, data + models
+scripts\windows\start.bat     # every time: preflight, 9 workers + dashboard → http://127.0.0.1:5000
+scripts\windows\verify.bat    # optional: end-to-end verification in an isolated database
+```
+
+There are two more guides:
+
+- [`docs/EXECUTION_GUIDE.md`](docs/EXECUTION_GUIDE.md): the step-by-step guide, including
+  troubleshooting.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): the final architecture, covering processes,
+  topics, control modes, state ownership and concurrency.
+
 ## Architecture
 
 ```
-simulator ──► [sensor_publisher] ──────────────► building_sensor_data ──┬─► [sensor_persistence] ──► PostgreSQL
-                                                                         ├─► [energy_processor] ────► PostgreSQL
-Open-Meteo, Electricity Maps ──► [external_data_publisher] ──► weather_data, carbon_intensity
-                                                                         └─► [record_persistence] ──► PostgreSQL
-building_sensor_data ──► [prediction_service] ──► energy_predictions ──► [record_persistence]
-sensor data + energy_predictions + carbon ──► [optimization_service] ──► optimization_commands ──► [record_persistence]
-building_sensor_data ──► [security_service] ──► security_alerts ──► [agent_service: LangGraph agent ─► safety validator]
-         ──► optimization_commands (approved) ──► [sensor_publisher --apply-commands] ──► simulator ──► agent_actions
-Flask + Socket.IO dashboard ◄── PostgreSQL (all processed data; polled for live push)
-dashboard controls ──► simulation_control ──► [simulation_manager] ──► building_sensor_data (start/stop/attacks)
+dashboard (Flask) ──► simulation_control ──► [simulation_manager: simulator + attacks + actuator]
+                                                      │ building_sensor_data
+     ┌────────────────┬──────────────────┬────────────┼───────────────────┬─────────────────────┐
+[sensor_persistence] [energy_processor] [prediction_service] [optimization_service] [security_service]
+     │ readings       │ energy + CO₂e    │ energy_predictions │ optimization_commands │ security_alerts
+     ▼                ▼                  ▼                    ▼                       ▼
+ PostgreSQL ◄── [record_persistence] ◄── weather/carbon ◄── [external_data_publisher]   [agent_service:
+     │                                                                                  LangGraph agent →
+     └──► dashboard pages + Socket.IO live push                                         safety validator]
+  approved commands (agent; + optimizer in closed loop) ──► simulation_manager ──► agent_actions (executed)
 ```
 
 Design rules:
@@ -37,7 +52,9 @@ Design rules:
 | `utils/logging_config.py` | Structured JSON/text logging, one log file per service |
 | `app.py` | Flask application factory (wiring only) |
 | `scripts/check_environment.py` | Verifies Python, packages, configuration and service connectivity |
-| `scripts/run_stack.py` | Starts every worker plus the dashboard as separate processes (development helper) |
+| `scripts/run_stack.py` | Starts and supervises every worker plus the dashboard (restart with backoff, graceful stop) |
+| `scripts/preflight.py`, `scripts/bootstrap.py`, `scripts/verify_system.py` | Start-up checks, one-time data/model setup, end-to-end verification |
+| `scripts/windows/` | `setup`, `start`, `stop`, `verify` (PowerShell + `.bat`) |
 | `simulator/` | Five-zone building physics, occupancy, outdoor climate, sensor and attack simulation |
 | `docs/sample_output/` | Sample simulator output (JSON Lines) |
 | `streaming/` | Kafka topic registry, JSON producer/consumer, connection helpers (named `streaming` so it does not shadow Kafka client libraries) |
@@ -1133,6 +1150,54 @@ default 500 ms consumer fetch wait (likely cause, not verified).
   versions and the git commit.
 - `report.md`, `summary.json`, `figures/`: generated **only** from those files.
 
+## Complete system integration (Module 12)
+
+All modules run together as one application. The full description is in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+**Control modes** (`CONTROL_MODE`):
+
+| Mode | What the simulator executes | Security detectors used |
+|---|---|---|
+| `advisory` (default) | agent actions only; optimizer commands are recommendations | trained on schedule-controlled data |
+| `closed_loop` | the optimizer's approved commands too: optimizer → building → readings → ML → optimizer | retrained on optimizer-controlled data |
+
+The detector set follows the control mode automatically (Module 11 finding). The optimization
+service mirrors the agent's sensor quarantine from `agent_actions`: it does not optimize zones whose
+readings are untrusted, and it resumes them after the agent's recovery thread restores the sensor.
+
+**Operational tools:**
+
+| Command | Purpose |
+|---|---|
+| `python -m scripts.bootstrap` | One-time and idempotent: schema, topics, 28 days of history through Kafka, ML model, detectors |
+| `python -m scripts.preflight` | Checks configuration, packages, Kafka, schema, models and mode consistency; every problem comes with its fix |
+| `python -m scripts.run_stack [--mode closed_loop]` | Starts and supervises all services: restarts with backoff, graceful stop on Windows and POSIX |
+| `python -m scripts.verify_system --launch [--mode closed_loop]` | End-to-end verification in an isolated database and topic set (≈ 10 min) |
+
+**Checks and fixes in this module:**
+
+| Issue | Fix |
+|---|---|
+| *Circular imports* | None found. An AST-based import-graph test keeps it that way. |
+| *Duplicate consumers* | Each service has its own consumer group (tested). A second `simulation_manager` refuses to start while the first one sends heartbeats. |
+| *Race conditions* | Agent investigations and the recovery thread share one lock. The simulation thread alone applies commands; Kafka threads only queue them. Statuses move forward only and parameters are merged on advance, so out-of-order messages keep the simulator's result. |
+| *Auto-reloader* | The dashboard ran two processes in debug mode (two pollers and an orphaned child). The reloader is now disabled. |
+| *Configuration* | Every variable in `config.py` is documented in `.env.example` (tested). Preflight reports a mismatch between detectors and control mode, a missing API key, a busy port, or a simulation that is already running. |
+| *Restarts* | Isolations are rebuilt from PostgreSQL by the agent and optimization services. The agent service now runs the recovery policy (it was missing). |
+
+**End-to-end verification.** The final runs on the committed code are in
+`docs/results/system_verification_advisory.md` and `docs/results/system_verification_closed_loop.md`.
+Each run:
+
+- starts 10 processes;
+- drives them through the dashboard API;
+- checks every link: simulator → Kafka → workers → PostgreSQL → ML predictions → optimization
+  (closed loop: executed by the simulator) → Socket.IO live push → attack detection → drift alerts
+  → agent diagnosis with safety-validated actions → command executed by the simulator → quarantine
+  on the dashboard (closed loop: the optimizer stops controlling the zone) → recovery → stop;
+- confirms that no service crashed.
+
 ## Verify the environment
 
 ```powershell
@@ -1161,5 +1226,6 @@ See `docs/PROGRESS.md` for the handoff notes: current state, how to resume, rege
 | 9 | Agentic AI (LangGraph), safety layer and simulated action execution | ✅ Done |
 | 10 | Flask web dashboard (live, Plotly, Socket.IO, simulation controls) | ✅ Done |
 | 11 | Experimental evaluation (end-to-end, 3 seeds, raw results + report) | ✅ Done |
+| 12 | Complete system integration (control modes, preflight, bootstrap, supervisor, end-to-end verification) | ✅ Done |
 
 Measured results are in `docs/results/` (generated by the commands shown in each section).

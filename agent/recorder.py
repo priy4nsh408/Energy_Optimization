@@ -53,6 +53,14 @@ class PostgresRecorder:
     def __init__(self, database) -> None:
         self.db = database
 
+    def record_actions(self, actions: list[ProposedAction]) -> None:
+        from database.repositories import upsert_optimization_action
+
+        with self.db.transaction() as conn:
+            for action in actions:
+                upsert_optimization_action(conn, validate_action_message(action.to_message(
+                    updated_at=action.created_at), topic="agent_actions"))
+
     def record(self, decision: AgentDecisionRecord, actions: list[ProposedAction]) -> None:
         from database.repositories import insert_record, upsert_optimization_action
 
@@ -67,6 +75,11 @@ class KafkaActionRecorder:
     def __init__(self, producer, topic: str) -> None:
         self.producer, self.topic = producer, topic
 
+    def record_actions(self, actions: list[ProposedAction]) -> None:
+        for action in actions:
+            self.producer.send(self.topic, action.to_message(updated_at=datetime.now(timezone.utc)),
+                               key=action.zone_id)
+
     def record(self, decision: AgentDecisionRecord, actions: list[ProposedAction]) -> None:
         for action in actions:
             self.producer.send(self.topic, action.to_message(updated_at=datetime.now(timezone.utc)),
@@ -78,6 +91,16 @@ class CompositeRecorder:
 
     def __init__(self, *recorders: DecisionRecorder) -> None:
         self.recorders = recorders
+
+    def record_actions(self, actions: list[ProposedAction]) -> None:
+        """Actions without an agent decision (e.g. recovery restores)."""
+        for recorder in self.recorders:
+            if not hasattr(recorder, "record_actions"):
+                continue
+            try:
+                recorder.record_actions(actions)
+            except Exception:  # noqa: BLE001
+                logger.exception("Action recorder failed", extra={"recorder": type(recorder).__name__})
 
     def record(self, decision: AgentDecisionRecord, actions: list[ProposedAction]) -> None:
         for recorder in self.recorders:

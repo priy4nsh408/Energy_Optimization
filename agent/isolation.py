@@ -52,6 +52,43 @@ class SensorIsolationRegistry:
         with self._lock:
             return [i for (z, _), i in sorted(self._items.items()) if zone_id is None or z == zone_id]
 
+    def apply_action_message(self, message: dict[str, Any]) -> bool:
+        """Follow an executed isolate/restore action from ``agent_actions``; returns whether state changed.
+
+        Lets other services (e.g. the optimizer) mirror the agent's quarantine.
+        """
+        if message.get("status") != "executed" or message.get("action_type") not in ("isolate_sensor",
+                                                                                        "restore_sensor"):
+            return False
+        zone, sensor = message.get("zone_id"), (message.get("parameters") or {}).get("sensor")
+        if not zone or sensor not in SENSOR_FIELDS:
+            return False
+        if message["action_type"] == "restore_sensor":
+            return self.restore(zone, sensor)
+        before = self.is_isolated(zone, sensor)
+        self.isolate(zone, sensor, since=datetime.fromisoformat(str(message.get("updated_at")
+                                                                      or message["created_at"])),
+                     reason=str(message.get("reason") or ""), alert_id=message.get("related_alert_id"))
+        return not before
+
+    def load_from_database(self, database) -> int:
+        """Restore the quarantine after a restart: latest executed isolate/restore per sensor wins."""
+        query = """
+            SELECT zone_id, sensor, updated_at, reason, related_alert_id FROM (
+                SELECT DISTINCT ON (zone_id, parameters->>'sensor') zone_id, parameters->>'sensor' AS sensor,
+                       action_type, updated_at, reason, related_alert_id
+                FROM optimization_actions
+                WHERE action_type IN ('isolate_sensor', 'restore_sensor') AND status = 'executed'
+                ORDER BY zone_id, parameters->>'sensor', updated_at DESC) latest
+            WHERE action_type = 'isolate_sensor'"""
+        with database.transaction() as conn:
+            rows = conn.execute(query).fetchall()
+        for zone, sensor, since, reason, alert_id in rows:
+            if sensor in SENSOR_FIELDS:
+                self.isolate(zone, sensor, since=since, reason=reason or "",
+                             alert_id=str(alert_id) if alert_id else None)
+        return len(rows)
+
     def mask(self, event: dict[str, Any]) -> dict[str, Any]:
         """Copy of a reading with the values of isolated sensors replaced by ``None``."""
         sensors = [i.sensor for i in self.isolated(event.get("zone_id"))]

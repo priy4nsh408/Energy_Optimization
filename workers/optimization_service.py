@@ -4,6 +4,9 @@ Consumes (own consumer group, starting at the newest events):
     building_sensor_data   current zone conditions (trigger decisions)
     energy_predictions     ML forecast for the same event (forecast basis)
     carbon_intensity       latest observed grid intensity (carbon weight)
+    agent_actions          executed sensor isolations/restores: zones whose temperature
+                           or occupancy sensor is isolated are not optimized (their
+                           readings are untrusted; they run on the baseline schedule)
 
 For each decision the optimizer's output is re-validated against the hard
 constraints and published with status ``approved`` or ``rejected`` (audit
@@ -42,7 +45,9 @@ from processors.data_validator import (
 from streaming.consumer import ConsumedMessage, JsonConsumer, KafkaConsumerFatalError
 from streaming.kafka_config import KafkaUnavailableError, create_admin_client, wait_for_broker
 from streaming.producer import JsonProducer
+from agent.isolation import SensorIsolationRegistry
 from streaming.topics import (
+    AGENT_ACTIONS,
     BUILDING_SENSOR_DATA,
     CARBON_INTENSITY,
     ENERGY_PREDICTIONS,
@@ -53,12 +58,15 @@ from utils.logging_config import configure_logging
 from utils.shutdown import install_shutdown_handlers
 
 SERVICE = "optimization_service"
+UNTRUSTED_FOR_CONTROL = ("temperature", "occupancy")
 _NAMESPACE = uuid.UUID("7d2f6f0e-31a9-4f0b-9f57-3e0c1b6a9a11")
 
 
 class OptimizationHandler:
-    def __init__(self, settings: OptimizationSettings, producer: JsonProducer, logger) -> None:
+    def __init__(self, settings: OptimizationSettings, producer: JsonProducer, logger,
+                 isolation: SensorIsolationRegistry | None = None) -> None:
         self.settings = settings
+        self.isolation = isolation or SensorIsolationRegistry()
         self.producer = producer
         self.logger = logger
         self.optimizer = ZoneOptimizer(settings, building_models())
@@ -75,6 +83,12 @@ class OptimizationHandler:
         try:
             if message.topic == CARBON_INTENSITY:
                 self._on_carbon(message.value)
+            elif message.topic == AGENT_ACTIONS:
+                if self.isolation.apply_action_message(message.value):
+                    self.stats["isolation_changes"] += 1
+                    self.logger.info("Sensor quarantine changed", extra={
+                        "zone_id": message.value.get("zone_id"), "action_type": message.value.get("action_type"),
+                        "sensor": (message.value.get("parameters") or {}).get("sensor")})
             elif message.topic == ENERGY_PREDICTIONS:
                 self._on_prediction(message.value)
             else:
@@ -107,6 +121,9 @@ class OptimizationHandler:
         stale = self._pending.pop(zone, None)
         if stale is not None:                       # its prediction never arrived
             self._decide(stale, None)
+        if any(self.isolation.is_isolated(zone, s) for s in UNTRUSTED_FOR_CONTROL):
+            self.stats["skipped_isolated_zone"] += 1          # untrusted readings: no optimization
+            return
         conditions = ZoneConditions.from_reading(reading)
         short = is_lighting_short(self.optimizer.models[zone], conditions)
         if not self.scheduler.due(zone, reading.event_time, reading.occupancy_count, short):
@@ -174,6 +191,22 @@ class OptimizationHandler:
         self.stats[f"published_{status}"] += 1
 
 
+def _load_isolations(config, isolation: SensorIsolationRegistry, logger) -> None:
+    """Warm-start the quarantine from PostgreSQL (optional: Kafka keeps it current afterwards)."""
+    from database.db import Database, DatabaseUnavailableError
+
+    database = Database(config.DATABASE, name=SERVICE)
+    try:
+        database.open(timeout_s=5)
+        count = isolation.load_from_database(database)
+        logger.info("Sensor quarantine loaded", extra={"isolated_sensors": count})
+    except (DatabaseUnavailableError, Exception) as exc:  # noqa: BLE001 - optional warm start
+        logger.warning("Sensor quarantine not loaded from PostgreSQL; following agent_actions only",
+                       extra={"error": str(exc)})
+    finally:
+        database.close()
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog=f"python -m workers.{SERVICE}",
                                      description="Publish optimized HVAC/lighting commands.")
@@ -201,10 +234,12 @@ def main(argv: list[str] | None = None, stop_event: threading.Event | None = Non
         logger.error("Kafka not available", extra={"error": str(exc)})
         return 1
 
+    isolation = SensorIsolationRegistry()
+    _load_isolations(config, isolation, logger)
     producer = JsonProducer(config.KAFKA, name=SERVICE)
-    handler = OptimizationHandler(config.OPTIMIZATION, producer, logger)
+    handler = OptimizationHandler(config.OPTIMIZATION, producer, logger, isolation)
     consumer = JsonConsumer(config.KAFKA, SERVICE,
-                            [BUILDING_SENSOR_DATA, ENERGY_PREDICTIONS, CARBON_INTENSITY],
+                            [BUILDING_SENSOR_DATA, ENERGY_PREDICTIONS, CARBON_INTENSITY, AGENT_ACTIONS],
                             auto_offset_reset="latest")
     logger.info("Optimization service started", extra={"settings": vars(config.OPTIMIZATION)})
     try:

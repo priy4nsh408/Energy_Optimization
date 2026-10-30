@@ -58,6 +58,7 @@ from pathlib import Path
 from typing import Any
 
 from config import BASE_DIR, SimulatorSettings, get_config
+from security.train import OPTIMIZER_CONTROL_ROOT as DETECTOR_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,6 @@ DEFAULT_ATTACKS = [
 # and detection of the next are not confounded (run 1 had the gradual attack in Z2 right after the replay).
 DEFAULT_SEEDS = (101, 202, 303)
 DEFAULT_START = datetime(2026, 2, 9, tzinfo=timezone.utc)     # Monday; detectors' season (trained on January)
-DETECTOR_ROOT = BASE_DIR / "security" / "artifacts" / "optimizer_control"
 UNTRUSTED_FOR_CONTROL = ("temperature", "occupancy")
 
 
@@ -133,33 +133,10 @@ def _sim_settings(cfg: EvalConfig, seed: int) -> SimulatorSettings:
 
 def train_optimizer_detectors(cfg: EvalConfig):
     """Detectors trained on clean, optimizer-controlled simulation (measured basis, no attacks)."""
-    from optimization.hvac_optimizer import ZoneConditions
-    from optimization.lighting_optimizer import is_lighting_short
-    from optimization.optimizer import DecisionScheduler
-    from experiments.scenarios import make_optimizer
-    from data_sources.carbon import MockCarbonProvider
-    from processors.data_validator import validate_sensor_event
-    from security.train import save_models, train_models
-    from simulator.engine import BuildingSimulator
+    from security.train import save_models, simulate_clean_readings, train_models
 
-    settings = SimulatorSettings(interval_seconds=1, speed_factor=300, random_seed=cfg.detector_training_seed,
-                                 start_time=cfg.detector_training_start)
-    simulator = BuildingSimulator(settings)
-    optimizer = make_optimizer(get_config().OPTIMIZATION)
-    scheduler = DecisionScheduler(optimizer.settings.decision_interval_s)
-    carbon = MockCarbonProvider().value_at
-    readings = []
-    for _ in range(int(cfg.detector_training_days * 86400 / settings.simulated_seconds_per_tick)):
-        for event in simulator.tick():
-            reading = validate_sensor_event(event)
-            readings.append(reading)
-            conditions = ZoneConditions.from_reading(reading)
-            short = is_lighting_short(optimizer.models[reading.zone_id], conditions)
-            if scheduler.due(reading.zone_id, reading.event_time, reading.occupancy_count, short):
-                decision = optimizer.optimize(conditions, carbon_intensity=carbon(reading.event_time))
-                if decision.approved:
-                    simulator.apply_command(reading.zone_id, setpoint_c=decision.setpoint_c,
-                                            lighting_level=decision.lighting_level)
+    readings = simulate_clean_readings(cfg.detector_training_days, cfg.detector_training_seed,
+                                       cfg.detector_training_start, control="optimizer")
     models = train_models(readings, source={
         "type": "simulator, optimizer-controlled (measured basis), no attacks",
         "days": cfg.detector_training_days, "seed": cfg.detector_training_seed,

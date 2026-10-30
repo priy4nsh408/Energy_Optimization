@@ -12,6 +12,14 @@ deterministic safety validator.
 * Sensor isolation is a software quarantine held by this service.
 * Decisions are stored in ``agent_decisions`` and the JSON Lines audit log;
   action outcomes in ``optimization_actions`` and on ``agent_actions``.
+* The quarantine (isolated sensors) is restored from PostgreSQL at start-up.
+  A background thread runs :class:`agent.recovery.RecoveryPolicy` every
+  ``AGENT_RECOVERY_INTERVAL_S``: sensors are restored once their zone has been
+  quiet for an hour; restores are recorded like every other action, so the
+  optimizer resumes the zone. Investigations and recovery share one lock, so
+  they never act on the same state concurrently.
+* Detectors for the investigation tools follow ``CONTROL_MODE`` /
+  ``SECURITY_DETECTORS`` (the same set as ``workers.security_service``).
 
 The LLM provider is chosen with ``AGENT_LLM_PROVIDER`` (see config.AgentSettings).
 
@@ -34,6 +42,7 @@ from agent.graph import IncidentAgent
 from agent.isolation import SensorIsolationRegistry
 from agent.llm import create_llm
 from agent.recorder import CompositeRecorder, JsonlRecorder, KafkaActionRecorder, PostgresRecorder
+from agent.recovery import RecoveryPolicy
 from agent.safety import SafetyValidator
 from agent.tools import AgentToolbox
 from config import ConfigurationError, get_config
@@ -41,7 +50,7 @@ from database.db import Database, DatabaseUnavailableError
 from optimization.hvac_optimizer import building_models
 from optimization.optimizer import ZoneOptimizer
 from processors.data_validator import ValidationError, validate_alert_message
-from security.train import SecurityModelNotFoundError, load_models
+from security.train import SecurityModelNotFoundError, load_configured_models
 from streaming.consumer import ConsumedMessage, JsonConsumer, KafkaConsumerFatalError
 from streaming.kafka_config import KafkaUnavailableError, create_admin_client, wait_for_broker
 from streaming.producer import JsonProducer
@@ -53,8 +62,10 @@ SERVICE = "agent_service"
 
 
 class AgentHandler:
-    def __init__(self, agent: IncidentAgent, dispatcher: IncidentDispatcher, logger) -> None:
+    def __init__(self, agent: IncidentAgent, dispatcher: IncidentDispatcher, logger,
+                 lock: threading.Lock | None = None) -> None:
         self.agent, self.dispatcher, self.logger = agent, dispatcher, logger
+        self.lock = lock or threading.Lock()
         self.stats: Counter[str] = Counter()
 
     def __call__(self, message: ConsumedMessage) -> None:
@@ -70,13 +81,44 @@ class AgentHandler:
             self.stats["skipped"] += 1
             self.logger.debug("Alert not investigated", extra={"alert_id": alert["alert_id"], "reason": why})
             return
-        decision = self.agent.run(alert)
-        self.dispatcher.remember(alert, decision)
+        with self.lock:
+            decision = self.agent.run(alert)
+            self.dispatcher.remember(alert, decision)
         self.stats["investigated"] += 1
         self.logger.info("Incident handled", extra={
             "alert_id": alert["alert_id"], "zone_id": alert.get("zone_id"), "provider": decision.llm_provider,
             "likely_cause": decision.likely_cause, "confidence": decision.confidence,
             "outcome": decision.outcome, "errors": decision.errors})
+
+
+class RecoveryLoop:
+    """Periodically restore isolated sensors whose zone is quiet (simulated time from PostgreSQL)."""
+
+    def __init__(self, recovery: RecoveryPolicy, data: PostgresDataSource, recorder, lock: threading.Lock,
+                 logger, interval_s: float) -> None:
+        self.recovery, self.data, self.recorder, self.lock = recovery, data, recorder, lock
+        self.logger, self.interval_s = logger, interval_s
+        self.restored = 0
+
+    def run_once(self) -> int:
+        now = self.data.now()
+        if now is None:
+            return 0
+        with self.lock:
+            actions = self.recovery.check(now)
+        for action in actions:
+            self.recorder.record_actions([action])
+            self.logger.info("Recovery action", extra={"zone_id": action.zone_id, "status": action.status,
+                                                       "sensor": action.parameters.get("sensor")})
+        self.restored += sum(a.status == "executed" for a in actions)
+        return len(actions)
+
+    def run(self, stop_event: threading.Event) -> None:
+        while not stop_event.wait(self.interval_s):
+            try:
+                self.run_once()
+            except Exception:  # noqa: BLE001 - keep the loop alive (e.g. database briefly down)
+                self.logger.exception("Recovery check failed")
 
 
 def main(argv: list[str] | None = None, stop_event: threading.Event | None = None) -> int:
@@ -98,7 +140,7 @@ def main(argv: list[str] | None = None, stop_event: threading.Event | None = Non
         stop_event = threading.Event()
         install_shutdown_handlers(stop_event)
     try:
-        security_models = load_models()
+        security_models = load_configured_models(config)
     except SecurityModelNotFoundError as exc:
         logger.warning("No trained detectors: anomaly/drift tools unavailable", extra={"error": str(exc)})
         security_models = None
@@ -116,6 +158,7 @@ def main(argv: list[str] | None = None, stop_event: threading.Event | None = Non
     settings = config.AGENT
     producer = JsonProducer(config.KAFKA, name=SERVICE)
     isolation = SensorIsolationRegistry()
+    restored = isolation.load_from_database(database)
     models = building_models()
     validator = SafetyValidator(settings, config.OPTIMIZATION, models, isolation)
     data = PostgresDataSource(database)
@@ -126,11 +169,20 @@ def main(argv: list[str] | None = None, stop_event: threading.Event | None = Non
     agent = IncidentAgent(llm=llm, toolbox=toolbox, data=data, isolation=isolation, validator=validator,
                           gateway=KafkaCommandGateway(producer, isolation, OPTIMIZATION_COMMANDS),
                           recorder=recorder, max_iterations=settings.max_iterations)
-    handler = AgentHandler(agent, IncidentDispatcher(settings, isolation), logger)
+    lock = threading.Lock()
+    handler = AgentHandler(agent, IncidentDispatcher(settings, isolation), logger, lock)
+    action_recorder = CompositeRecorder(PostgresRecorder(database), KafkaActionRecorder(producer, AGENT_ACTIONS))
+    recovery = RecoveryLoop(RecoveryPolicy(data, isolation, validator,
+                                           KafkaCommandGateway(producer, isolation, OPTIMIZATION_COMMANDS)),
+                            data, action_recorder, lock, logger, config.SYSTEM.recovery_interval_s)
+    recovery_thread = threading.Thread(target=recovery.run, args=(stop_event,), name="recovery", daemon=True)
+    recovery_thread.start()
     consumer = JsonConsumer(config.KAFKA, SERVICE, [SECURITY_ALERTS],
                             auto_offset_reset="earliest" if args.from_beginning else "latest")
-    logger.info("Agent service started", extra={"provider": llm.provider, "model": llm.model,
-                                                "min_severity": settings.min_alert_severity})
+    logger.info("Agent service started", extra={
+        "provider": llm.provider, "model": llm.model, "min_severity": settings.min_alert_severity,
+        "detectors": security_models.metadata.get("version") if security_models else None,
+        "detector_set": config.SYSTEM.detector_set, "isolated_sensors_restored": restored})
     try:
         consumer.run(handler, stop_event=stop_event, max_messages=args.max_messages,
                      idle_timeout_s=args.idle_timeout)
@@ -139,10 +191,12 @@ def main(argv: list[str] | None = None, stop_event: threading.Event | None = Non
     except KeyboardInterrupt:
         logger.info("Interrupted")
     finally:
+        stop_event.set()
+        recovery_thread.join(timeout=10)
         consumer.close()
         producer.close()
         database.close()
-        logger.info("Agent service stopped", extra=dict(handler.stats))
+        logger.info("Agent service stopped", extra={**handler.stats, "restored": recovery.restored})
     return 0
 
 

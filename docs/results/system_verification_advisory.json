@@ -1,0 +1,220 @@
+{
+  "mode": "advisory",
+  "passed": true,
+  "started": "2026-10-30T19:36:12.405300+00:00",
+  "environment": {
+    "POSTGRES_DB": "smart_building_verify1030193612",
+    "KAFKA_TOPIC_PREFIX": "verify1030193612_",
+    "KAFKA_CONSUMER_GROUP_PREFIX": "verify1030193612",
+    "FLASK_PORT": "5055",
+    "CONTROL_MODE": "advisory",
+    "WEATHER_PROVIDER": "mock",
+    "CARBON_PROVIDER": "mock",
+    "AGENT_LLM_PROVIDER": "offline",
+    "AGENT_AUDIT_LOG": "logs/verify1030193612_agent_decisions.jsonl",
+    "LOG_TO_FILE": "false"
+  },
+  "results": [
+    {
+      "step": "dashboard health + Socket.IO",
+      "required": true,
+      "passed": true,
+      "seconds": 0.0,
+      "detail": "health 200; Socket.IO connected",
+      "evidence": {}
+    },
+    {
+      "step": "start simulation from the dashboard API",
+      "required": true,
+      "passed": true,
+      "seconds": 2.5,
+      "detail": "POST start -> 202; simulation_status running: True",
+      "evidence": {
+        "http_status": 202
+      }
+    },
+    {
+      "step": "simulator -> Kafka",
+      "required": true,
+      "passed": true,
+      "seconds": 5.0,
+      "detail": "verify1030193612_building_sensor_data: 10 -> 35 messages",
+      "evidence": {
+        "topic": "verify1030193612_building_sensor_data",
+        "end_offsets": [
+          10,
+          35
+        ]
+      }
+    },
+    {
+      "step": "Kafka -> processing workers -> PostgreSQL",
+      "required": true,
+      "passed": true,
+      "seconds": 0.0,
+      "detail": "sensor_readings 35, energy_records_with_co2e 35, weather_records 25, carbon_intensity_records 25",
+      "evidence": {
+        "sensor_readings": 35,
+        "energy_records_with_co2e": 35,
+        "weather_records": 25,
+        "carbon_intensity_records": 25
+      }
+    },
+    {
+      "step": "ML energy predictions",
+      "required": true,
+      "passed": true,
+      "seconds": 8.0,
+      "detail": "15 predictions, 10 scored, MAE 0.024 kW",
+      "evidence": {
+        "scored_predictions": 10,
+        "mae_kw": 0.023639999999999946,
+        "mean_actual_kw": 1.9338359999999999,
+        "predictions": 15
+      }
+    },
+    {
+      "step": "energy optimization",
+      "required": true,
+      "passed": true,
+      "seconds": 0.0,
+      "detail": "25 optimizer commands, 0 executed by the simulator (advisory)",
+      "evidence": {
+        "optimizer_commands": 25,
+        "executed_by_simulator": 0
+      }
+    },
+    {
+      "step": "dashboard live updates (Socket.IO)",
+      "required": true,
+      "passed": true,
+      "seconds": 0.0,
+      "detail": "events received: {'status': 8, 'readings': 7, 'actions': 5}; simulation state in pushed status: running",
+      "evidence": {
+        "status": 8,
+        "readings": 7,
+        "actions": 5
+      }
+    },
+    {
+      "step": "warm-up to 26 simulated hours",
+      "required": true,
+      "passed": true,
+      "seconds": 300.2,
+      "detail": "simulated 02-09 00:05 -> 02-10 02:20",
+      "evidence": {}
+    },
+    {
+      "step": "cyberattack detection (+ live alert)",
+      "required": true,
+      "passed": true,
+      "seconds": 2.0,
+      "detail": "attack temperature_spoofing on Z1 detected after 0 simulated min by rules; pushed to the dashboard: True",
+      "evidence": {
+        "attack_id": "4a47b2a5-b2f3-4337-aa4f-05a3b945f47c",
+        "alert_id": "6d3b8677-bfd2-5877-a23d-0dd3cf346495",
+        "detector": "rules",
+        "detection_latency_sim_min": 0.0,
+        "readings_manipulated": 1,
+        "alert_pushed_over_socketio": true
+      }
+    },
+    {
+      "step": "drift detection",
+      "required": true,
+      "passed": true,
+      "seconds": 0.0,
+      "detail": "drift alerts by classification: {'data_drift': 20, 'gradual_manipulation': 5}",
+      "evidence": {
+        "data_drift": 20,
+        "gradual_manipulation": 5
+      }
+    },
+    {
+      "step": "agent diagnosis and validated actions",
+      "required": true,
+      "passed": true,
+      "seconds": 6.0,
+      "detail": "offline: 'manipulated (spoofed) temperature readings' (high); 1 approved, 1 executed; temperature isolated: True",
+      "evidence": {
+        "decision_id": "0bf7e682-a468-50dc-a829-cece99096dbd",
+        "provider": "offline",
+        "likely_cause": "manipulated (spoofed) temperature readings",
+        "confidence": "high",
+        "outcome": "1 approved, 1 executed",
+        "tools": [
+          "get_sensor_data",
+          "get_energy_data",
+          "get_weather_and_carbon",
+          "run_anomaly_detection",
+          "run_drift_analysis",
+          "isolate_sensor",
+          "adjust_hvac",
+          "submit_assessment"
+        ],
+        "actions": [
+          [
+            "isolate_sensor",
+            "executed",
+            "sensor quarantine rules satisfied (software only, no equipment change)"
+          ],
+          [
+            "clear_overrides",
+            "approved",
+            "return to baseline schedule is always permitted (safe fallback)"
+          ]
+        ],
+        "decision_pushed": true
+      }
+    },
+    {
+      "step": "building feedback loop",
+      "required": true,
+      "passed": true,
+      "seconds": 0.0,
+      "detail": "agent_command_executed_by_simulator: ('overrides cleared, zone back on its baseline schedule', '2026-02-10T02:50:00+00:00'); dashboard_isolated_sensors: ['temperature']",
+      "evidence": {
+        "agent_command_executed_by_simulator": [
+          "overrides cleared, zone back on its baseline schedule",
+          "2026-02-10T02:50:00+00:00"
+        ],
+        "dashboard_isolated_sensors": [
+          "temperature"
+        ]
+      }
+    },
+    {
+      "step": "recovery (sensor restored)",
+      "required": false,
+      "passed": true,
+      "seconds": 40.0,
+      "detail": "temperature sensor restored 165 simulated min after the attack ended",
+      "evidence": {
+        "restored_at": "2026-02-10 06:10:00+00:00",
+        "minutes_after_attack_end": 165.0
+      }
+    },
+    {
+      "step": "stop simulation from the dashboard API",
+      "required": true,
+      "passed": true,
+      "seconds": 8.0,
+      "detail": "POST stop -> 202; paused: True; simulated time frozen: True",
+      "evidence": {
+        "http_status": 202,
+        "sim_time": [
+          "2026-02-10 06:20:00+00:00",
+          "2026-02-10 06:20:00+00:00"
+        ]
+      }
+    },
+    {
+      "step": "no service crashed or restarted",
+      "required": true,
+      "passed": true,
+      "seconds": 0.0,
+      "detail": "10 processes stopped cleanly",
+      "evidence": {}
+    }
+  ]
+}

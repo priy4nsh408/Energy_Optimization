@@ -1,13 +1,16 @@
 """Start every service of the system as separate processes (development helper).
 
-    python -m scripts.run_stack                       # all workers + dashboard
+    python -m scripts.run_stack                       # all workers + dashboard (CONTROL_MODE from .env)
+    python -m scripts.run_stack --mode closed_loop    # simulator also executes optimizer commands
     python -m scripts.run_stack --no-dashboard
     python -m scripts.run_stack --only simulation_manager,sensor_persistence
 
 Each service runs as its own process (``python -m workers.<name>``) with its
-log in ``logs/stack/<name>.log``. Ctrl+C stops them all. Works on Windows and
-Linux. Kafka and PostgreSQL must already be running (docker compose), the
-schema initialised (``python -m database init``) and the models trained.
+output in ``logs/stack/<name>.log``. A service that exits unexpectedly is
+restarted (at most ``--max-restarts`` times, with increasing delay); Ctrl+C
+stops them all. Works on Windows and Linux. ``scripts.preflight`` runs first
+and blocks the start if Kafka, PostgreSQL, the schema or a model is missing
+(``python -m scripts.bootstrap`` prepares everything once).
 
 The simulation starts paused at ``--start`` (default 2026-02-09, inside the
 security detectors' training season); press Start on the dashboard.
@@ -17,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -48,6 +52,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--autostart", action="store_true", help="start the simulation immediately")
     parser.add_argument("--mock-external", action="store_true",
                         help="use mock weather/carbon providers (no API keys or internet)")
+    parser.add_argument("--mode", choices=["advisory", "closed_loop"], help="override CONTROL_MODE")
+    parser.add_argument("--max-restarts", type=int, default=3, help="per service (default 3)")
+    parser.add_argument("--skip-preflight", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -63,6 +70,13 @@ def main(argv: list[str] | None = None) -> int:
     env = dict(os.environ)
     if args.mock_external:
         env.update(WEATHER_PROVIDER="mock", CARBON_PROVIDER="mock")
+    if args.mode:
+        env["CONTROL_MODE"] = args.mode
+    if not args.skip_preflight:
+        print("running preflight checks ...", flush=True)
+        if subprocess.run([sys.executable, "-m", "scripts.preflight"], cwd=BASE_DIR, env=env).returncode != 0:
+            print("Preflight failed: fix the problems above (or run python -m scripts.bootstrap).", file=sys.stderr)
+            return 2
     simulation = ["--start", args.start, "--interval", str(args.interval), "--speed", str(args.speed),
                   "--seed", str(args.seed), *(["--autostart"] if args.autostart else [])]
     commands = {n: [sys.executable, "-m", f"workers.{n}", *SERVICES[n],
@@ -70,35 +84,82 @@ def main(argv: list[str] | None = None) -> int:
     if not args.no_dashboard:
         commands["dashboard"] = [sys.executable, "app.py"]
 
-    processes: dict[str, tuple[subprocess.Popen, object]] = {}
+    supervisor = Supervisor(commands, env, log_dir, max_restarts=args.max_restarts)
     try:
-        for name, command in commands.items():
-            handle = open(log_dir / f"{name}.log", "a", encoding="utf-8")   # noqa: SIM115 - closed below
-            processes[name] = (subprocess.Popen(command, cwd=BASE_DIR, env=env, stdout=handle,
-                                                stderr=subprocess.STDOUT), handle)
-            print(f"started {name:<24} pid {processes[name][0].pid}  log {Path('logs/stack') / (name + '.log')}")
-            time.sleep(0.5)
-        if "dashboard" in processes:
-            config_port = os.environ.get("FLASK_PORT", "5000")
-            print(f"\nDashboard: http://127.0.0.1:{config_port}  (Ctrl+C stops everything)")
-        while True:
-            for name, (process, _) in processes.items():
-                if process.poll() is not None:
-                    print(f"{name} exited with code {process.returncode}; see logs/stack/{name}.log")
-                    return 1
+        supervisor.start_all()
+        if "dashboard" in commands:
+            print(f"\nDashboard: http://127.0.0.1:{env.get('FLASK_PORT', '5000')}  (Ctrl+C stops everything)")
+        print(f"control mode: {env.get('CONTROL_MODE', 'advisory')}; logs: logs/stack/", flush=True)
+        while supervisor.watch():
             time.sleep(2)
+        return 1
     except KeyboardInterrupt:
         print("\nstopping ...")
         return 0
     finally:
-        for name, (process, _) in reversed(list(processes.items())):
+        supervisor.stop_all()
+
+
+class Supervisor:
+    """Starts the services, restarts crashed ones (bounded, with backoff) and stops them in reverse order."""
+
+    def __init__(self, commands: dict[str, list[str]], env: dict[str, str], log_dir: Path, *,
+                 max_restarts: int = 3) -> None:
+        self.commands, self.env, self.log_dir, self.max_restarts = commands, env, log_dir, max_restarts
+        self.processes: dict[str, subprocess.Popen] = {}
+        self.handles: dict[str, object] = {}
+        self.restarts: dict[str, int] = {name: 0 for name in commands}
+        self.restart_at: dict[str, float] = {}
+
+    def _start(self, name: str) -> None:
+        handle = self.handles.get(name) or open(self.log_dir / f"{name}.log", "a", encoding="utf-8")  # noqa: SIM115
+        self.handles[name] = handle
+        # Windows: a process group of its own, so stop_all() can send Ctrl+Break (a graceful stop that
+        # the workers handle) instead of TerminateProcess.
+        flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+        self.processes[name] = subprocess.Popen(self.commands[name], cwd=BASE_DIR, env=self.env, stdout=handle,
+                                                stderr=subprocess.STDOUT, creationflags=flags)
+        print(f"started {name:<24} pid {self.processes[name].pid}  log logs/stack/{name}.log", flush=True)
+
+    def start_all(self) -> None:
+        for name in self.commands:
+            self._start(name)
+            time.sleep(0.5)
+
+    def watch(self) -> bool:
+        """Restart crashed services; returns False when a service exceeded its restarts."""
+        now = time.monotonic()
+        for name, process in list(self.processes.items()):
             if process.poll() is None:
-                process.terminate()
-        for name, (process, handle) in processes.items():
+                continue
+            if name in self.restart_at:
+                if now >= self.restart_at.pop(name):
+                    self._start(name)
+                continue
+            if self.restarts[name] >= self.max_restarts:
+                print(f"{name} exited with code {process.returncode} {self.restarts[name] + 1} times; "
+                      f"giving up (see logs/stack/{name}.log)", flush=True)
+                return False
+            self.restarts[name] += 1
+            delay = 2 ** self.restarts[name]
+            print(f"{name} exited with code {process.returncode}; restart {self.restarts[name]}/"
+                  f"{self.max_restarts} in {delay} s", flush=True)
+            self.restart_at[name] = now + delay
+        return True
+
+    def stop_all(self) -> None:
+        for process in reversed(list(self.processes.values())):
+            if process.poll() is None:
+                if os.name == "nt":
+                    process.send_signal(signal.CTRL_BREAK_EVENT)
+                else:
+                    process.terminate()                  # SIGTERM: graceful stop in every worker
+        for process in self.processes.values():
             try:
                 process.wait(timeout=20)
             except subprocess.TimeoutExpired:
                 process.kill()
+        for handle in self.handles.values():
             handle.close()
 
 
