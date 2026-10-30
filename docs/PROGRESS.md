@@ -4,8 +4,8 @@ Status of *Smart Building Energy Optimization Using Real-Time Streaming, Cyberse
 Use this file to continue the work later, alone or in a new Claude session.
 
 - **Branch:** `claude/nifty-brown-uckrlo`
-- **Last completed module:** 10 (Flask web dashboard)
-- **Tests:** 365 passed, with Docker running and the three datasets in `data/raw/`.
+- **Last completed module:** 11 (experimental evaluation) — all planned modules are done
+- **Tests:** 374 passed, with Docker running and the three datasets in `data/raw/`.
 
 ## Module status
 
@@ -21,7 +21,7 @@ Use this file to continue the work later, alone or in a new Claude session.
 | 8 | Cybersecurity + drift detection | ✅ | `741c57c` | `simulator/attack_simulator.py`, `security/`, `python -m security.train`, `workers.security_service`, `python -m experiments.cyberattack_experiment` |
 | 9 | Agentic AI (LangGraph) + safety layer + simulated execution | ✅ | see git log | `agent/`, `python -m agent.demo`, `workers.agent_service`, `workers.sensor_publisher --apply-commands` |
 | 10 | Flask web dashboard | ✅ | see git log | `app.py`, `routes/`, `services/`, `templates/`, `static/`, `workers.simulation_manager`, `python -m scripts.run_stack` |
-| 11 | Experiments and evaluation | ⏳ next | | |
+| 11 | Experimental evaluation | ✅ | see git log | `python -m experiments.evaluation`, `experiments.streaming_latency`, `experiments.evaluation_report`; results in `docs/results/evaluation/` |
 
 Measured results are in `docs/results/` and summarised in `README.md`.
 
@@ -66,6 +66,7 @@ These are git-ignored, either because they are large or because they are generat
 | ML models (`ml/artifacts/`) | `python -m ml.train --dataset kag`, then `python -m ml.train --dataset building --start 2026-01-05T00:00+00:00 --end 2026-02-02T00:00+00:00` |
 | Security detectors (`security/artifacts/`) | `python -m security.train` (28 clean simulated days, seed 2026); also needed by `agent.demo` and the agent's anomaly/drift tools |
 | Agent audit log (`logs/agent_decisions.jsonl`) | Created automatically |
+| Optimizer-controlled detectors (`security/artifacts/optimizer_control/`) | Trained by `python -m experiments.evaluation` (version `20261030T165511Z` was used for the reported runs) |
 | API cache (`data/cache/`), logs | Created automatically |
 
 ## Key design decisions (keep these when continuing)
@@ -133,18 +134,24 @@ These are git-ignored, either because they are large or because they are generat
    - Fix idea: retrain the detectors on data recorded with the optimizer in control.
    - Also inherited from Module 8: an occupancy-hiding attack is first classified as
      `abnormal_power`, so the power meter is isolated before the occupancy sensor.
-7. **Claude not run live.** The Anthropic path is unit-tested with a mocked client only; no API key
+7. **Evaluation findings (Module 11).** See the README section *Experimental evaluation*.
+   Detectors are specific to the control regime, and zones under attack recover slowly because of
+   that.
+8. **Claude not run live.** The Anthropic path is unit-tested with a mocked client only; no API key
    was available in the development environment. Run `python -m agent.demo --provider anthropic`.
-8. **Windows.** Not yet run on Windows; developed and tested on Linux.
+9. **Windows.** Not yet run on Windows; developed and tested on Linux.
 
-## Next step: Module 11 (experiments and evaluation)
+## Possible next steps
 
-To be scoped with the user. Candidates:
+All 11 planned modules are done. Ideas the evaluation pointed to, none of them implemented:
 
-- A consolidated evaluation report across modules (prediction, optimization, security, agent).
-- Repeated runs or seeds with confidence intervals.
-- Detectors retrained on data recorded with the optimizer in control.
-- A live Claude run of the agent.
+- **Control-regime-aware detectors.** Detectors trained on optimizer-controlled data raise false
+  alarms when the agent returns a zone to its baseline schedule (live precision 0.32 vs. 0.94
+  passively), and this delays recovery. A fix would choose the detector by each zone's control mode.
+- **ML model retraining** on optimizer-controlled history. Prediction MAE is 0.33 kW under the
+  optimizer vs. 0.13 kW under baseline control.
+- **A live Claude run** of the agent (needs `ANTHROPIC_API_KEY`).
+- **More seeds or longer runs** for tighter confidence intervals.
 
 ## How to continue with Claude
 
@@ -153,4 +160,4 @@ Start a new session on this repository and branch, and paste:
 > Continue the Smart Building Energy Optimization project on branch `claude/nifty-brown-uckrlo`.
 > Read `docs/PROGRESS.md` and `README.md` first, then inspect the repository. Follow the same
 > working method as before: one module at a time, tests, honest results, commit and push, then stop
-> for approval. Implement Module 11: Experiments and evaluation.
+> for approval. Then tell Claude what to work on next.

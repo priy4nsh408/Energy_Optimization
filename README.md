@@ -52,7 +52,7 @@ Design rules:
 | `agent/` | Agentic AI: LangGraph incident agent, tools, LLM providers, deterministic safety validator, simulated execution, decision records |
 | `routes/`, `templates/`, `static/` | Flask dashboard: pages, JSON API, Bootstrap/Plotly/Socket.IO front end |
 | `services/` | Dashboard service layer: PostgreSQL queries, simulation-control publisher, live-update poller |
-| `experiments/` | Closed-loop baseline vs. optimized comparison; labelled cyberattack evaluation |
+| `experiments/` | Closed-loop baseline vs. optimized comparison, labelled cyberattack evaluation, KAG real-data analyses, Module 11 end-to-end evaluation (`evaluation.py`, `evaluation_report.py`, `streaming_latency.py`) |
 | `docker/` | Kafka and PostgreSQL containers |
 | `tests/` | Unit tests (pytest) |
 
@@ -992,6 +992,147 @@ The pages load Bootstrap 5.3.3, Bootstrap Icons 1.11.3, Plotly.js 2.35.2 and the
 2. *Action history.* When an action's status advances, its parameters are now merged, so the
    simulator's execution result is kept.
 
+## Experimental evaluation (Module 11)
+
+One reproducible experiment compares all parts of the system on the same simulated days.
+
+| # | Scenario | Optimizer | Attacks | Detection, agent, recovery |
+|---|---|---|---|---|
+| 1 | `baseline` | – (schedule control) | – | – |
+| 2 | `optimized` | ML basis (building XGBoost model + SciPy) | – | – |
+| 3 | `attack_undefended` | ML basis | 5 attacks | detectors run passively, nobody acts |
+| 4, 5 | `attack_defended` | ML basis | 5 attacks | live detectors → LangGraph agent (offline policy) → safety validator → simulator; automatic recovery |
+
+**Same conditions in every scenario.** Each seed fixes occupancy, weather and sensor noise for all
+four scenarios, so they differ only in control, attacks and defence.
+
+**What is measured, and on what data:**
+
+- *Energy, carbon, peak and comfort* come from the **true** readings.
+- *ML model, optimizer, detectors and agent* see only the published (possibly manipulated)
+  readings.
+- *Attacks* (day 1–2):
+  - temperature spoofing (Z1);
+  - hidden occupancy (Z3);
+  - power ×3 (Z4);
+  - replay of day-old data (Z2);
+  - a 12-hour gradual temperature ramp (Z2).
+- *Post-recovery period:* starts once the recovery policy (`agent/recovery.py`) has restored every
+  isolated sensor. A sensor is restored after its zone has had no security alert for an hour (data
+  drift excluded); the restore goes through the safety validator, and the optimizer then resumes
+  that zone.
+
+**Detectors.** Module 9 found that the Module 8 detectors raise false alarms under optimizer
+control, so the experiment trains a second detector set: 28 days of clean, optimizer-controlled
+simulation from a different seed and weeks. It evaluates both sets on the same attacked stream.
+
+**Commands:**
+
+```powershell
+python -m experiments.evaluation --out docs/results/evaluation          # raw results + config.json (~1 h, 4 processes)
+python -m experiments.streaming_latency --out docs/results/evaluation   # Kafka transport latency (needs Docker)
+python -m experiments.evaluation_report --run docs/results/evaluation   # tables, graphs, report.md, summary.json
+```
+
+**Results** (`docs/results/evaluation/report.md`; 3 seeds × 4 simulated days from 9 Feb; mean ± sample std):
+
+| Scenario | Energy (kWh) | Saving | CO₂e (kg) | Reduction | Peak (kW) | Peak red. | Comfort |
+|---|---|---|---|---|---|---|---|
+| 1 Baseline | 1806.4 ± 29.3 | – | 527.3 ± 7.9 | – | 38.4 ± 0.1 | – | 93.2 % |
+| 2 ML-optimized | 1586.5 ± 6.4 | 12.16 ± 1.13 % | 469.6 ± 1.9 | 10.92 ± 1.02 % | 35.9 ± 1.1 | 6.44 ± 3.15 % | 94.5 % |
+| 3 Attack, no defence | 1601.3 ± 4.9 | 11.34 ± 1.20 % | 473.7 ± 1.6 | 10.15 ± 1.07 % | 35.2 ± 0.5 | 8.39 ± 1.73 % | 94.3 % |
+| 4/5 Attack + defence | 1637.1 ± 14.9 | 9.36 ± 0.84 % | 482.4 ± 4.1 | 8.50 ± 0.74 % | 36.3 ± 2.4 | 5.52 ± 6.58 % | 94.0 % |
+
+**Energy and recovery:**
+
+- *Post-recovery:* in the same window after every sensor was restored, the defended run kept
+  **98.1 ± 4.2 %** of the optimizer's saving (8.09 % vs. 8.16 % below baseline).
+- *Cost of defending:* during the attack window the defended building saved less (8.2 % vs. 14.9 %
+  for the clean optimizer), because isolated zones run on their baseline schedule.
+
+**Prediction accuracy** (next-interval power, MAE):
+
+| Case | MAE |
+|---|---|
+| Baseline control | 0.131 kW |
+| Under optimizer control | 0.332 kW |
+| Inputs manipulated by an attack, no defence | 1.164 kW |
+| Inputs manipulated by an attack, with defence | 0.730 kW |
+
+The model was trained on baseline-controlled history, so it is less accurate under optimizer
+control.
+
+**Detection** (per reading, after the warm-up):
+
+| Detectors | Precision | Recall | FPR |
+|---|---|---|---|
+| Module 8, passive | 0.057 | 0.939 | 29.9 % |
+| Retrained on optimizer data, passive | 0.941 | 0.939 | 0.11 % |
+| Same, live with the agent | 0.318 | 0.939 | 4.35 % |
+
+- *Detection latency:* 0 min (spoofing, power), 2 ± 3 min (replay), 15 ± 9 min (hidden occupancy),
+  280 ± 125 min (0.4 °C/h gradual ramp).
+
+**Corrective action** (all 5 attacks contained in 3/3 seeds):
+
+- *Containment:* 15–33 min after the attack started (gradual: 170 ± 17 min).
+- *Recovery after the attack ended:*
+
+  | Attack | Recovery time |
+  |---|---|
+  | Abnormal power | 60 ± 0 min |
+  | Hidden occupancy | 62 ± 40 min |
+  | Spoofing | 155 ± 69 min |
+  | Gradual ramp | 375 ± 0 min |
+  | Replay | 1075 ± 69 min |
+
+**Processing latency** (p50 / p95 per call):
+
+| Step | p50 | p95 |
+|---|---|---|
+| ML prediction | 81 ms | 143 ms |
+| Security monitor | 21 ms | 45 ms |
+| Optimizer decision | 1.3 ms | 6.8 ms |
+| Agent incident (offline policy) | 1.44 s | 2.28 s |
+| Kafka producer → consumer at 5–50 msg/s | ≈21 ms | ≈23 ms |
+
+At 500 msg/s the Kafka p95 rises to 409 ms. All maxima are about 510 ms, which matches librdkafka's
+default 500 ms consumer fetch wait (likely cause, not verified).
+
+**Findings:**
+
+1. **The optimizer saves energy and the defence preserves it.** Savings return after recovery
+   (98 % retained). During attacks, isolating zones costs part of the saving: the price of not
+   trusting manipulated data.
+2. **The Module 8 detectors do not suit an optimizer-controlled building** (precision 0.06).
+   Retraining them on optimizer-controlled data fixes this (0.94).
+3. **Detectors are specific to the control regime, and the defence changes the regime.**
+   - When the agent returns a zone to its baseline schedule, the optimizer-trained detectors flag
+     that zone's normal baseline behaviour. Live precision falls to 0.32, false alerts rise to
+     29 per day, the agent sees more incidents, and zones need longer to become quiet. The replay
+     zone took about 18 h to recover.
+   - *Fix idea (not implemented):* detectors that know which control regime each zone is in.
+4. **Undefended attacks change energy only a little** (11.3 % vs. 12.2 % saving), because the
+   simulated attacks mostly mislead monitoring and accounting. The ML forecast error triples on
+   manipulated inputs.
+
+**Process notes:**
+
+- *Run 1* (`docs/results/evaluation_run1/`) put the gradual attack in the same zone right after the
+  replay, which confounded two metrics (see its README). Run 2 changed only that, decided before
+  seeing run 2's results.
+- *Provenance:* how the run 2 timings were obtained is documented in
+  `docs/results/evaluation/PROVENANCE.md`. A re-run of the six attack jobs gave identical results
+  apart from wall-clock timings.
+
+**Where the outputs are:**
+
+- `raw/`: per seed and scenario, the raw results (`*.json.gz`: per-reading detections, alerts,
+  agent decisions and actions, predictions, latency samples) and a 5-minute time series (`*.csv`).
+- `config.json`: every setting, the model and detector versions, the attack schedule, the package
+  versions and the git commit.
+- `report.md`, `summary.json`, `figures/`: generated **only** from those files.
+
 ## Verify the environment
 
 ```powershell
@@ -1019,6 +1160,6 @@ See `docs/PROGRESS.md` for the handoff notes: current state, how to resume, rege
 | 8 | Cyberattack simulation, anomaly and drift detection | ✅ Done |
 | 9 | Agentic AI (LangGraph), safety layer and simulated action execution | ✅ Done |
 | 10 | Flask web dashboard (live, Plotly, Socket.IO, simulation controls) | ✅ Done |
-| 11 | Experiments and evaluation | ⏳ Next |
+| 11 | Experimental evaluation (end-to-end, 3 seeds, raw results + report) | ✅ Done |
 
 Measured results are in `docs/results/` (generated by the commands shown in each section).

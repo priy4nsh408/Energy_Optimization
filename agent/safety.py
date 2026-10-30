@@ -46,6 +46,11 @@ PARAMETERS: dict[str, tuple[set[str], set[str]]] = {          # action -> (requi
 OCCUPANCY_ATTACKS = {"occupancy_manipulation", "replay"}
 
 
+def security_relevant(alerts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Alerts that can indicate manipulation (data drift is a model-validity signal, not an attack)."""
+    return [a for a in alerts if (a.get("details") or {}).get("classification") != "data_drift"]
+
+
 @dataclass(frozen=True)
 class SafetyVerdict:
     approved: bool
@@ -114,9 +119,9 @@ class SafetyValidator:
         if action.action_type == "restore_sensor":
             if not isolated:
                 return [f"{sensor} sensor in {action.zone_id} is not isolated"]
-            recent = [a for a in zone_alerts if datetime.fromisoformat(str(a["detected_at"]))
-                      >= now - timedelta(hours=1)]
-            return [f"{len(recent)} alert(s) for {action.zone_id} in the last hour; "
+            recent = [a for a in security_relevant(zone_alerts)
+                      if datetime.fromisoformat(str(a["detected_at"])) >= now - timedelta(hours=1)]
+            return [f"{len(recent)} security alert(s) for {action.zone_id} in the last hour; "
                     "restore only after the zone has been quiet for an hour"] if recent else []
         if isolated:
             return [f"{sensor} sensor in {action.zone_id} is already isolated"]
