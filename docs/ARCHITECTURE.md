@@ -112,6 +112,7 @@ exceptions need care:
 | Sensor quarantine | `agent_service` (in memory, thread-safe) | `agent_actions`; PostgreSQL; rebuilt from PostgreSQL at start-up by the agent and optimization services |
 | Action lifecycle | upserts in `optimization_actions` | status moves forward only (`proposed → approved/rejected → executed/failed`); later messages add parameters (e.g. the simulator's result) |
 | Simulation state | `simulation_status` (heartbeat every 3 s) | dashboard status, single-instance guard |
+| Simulated timeline | `run_stack` picks the start: 9 Feb 2026, or one step after the latest stored reading | reading ids depend on seed *and* start time, so a new run never collides with stored history (the duplicate check would otherwise drop its readings) |
 | Everything for display | PostgreSQL | dashboard queries, anchored on the most recently *stored* data |
 
 ## 6. Concurrency and failure handling

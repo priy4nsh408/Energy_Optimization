@@ -188,14 +188,15 @@ class DashboardData:
         return {"rows": rows, "accuracy": accuracy}
 
     def optimizer_savings(self, hours: Any = 24) -> list[dict[str, Any]]:
-        """Optimizer's predicted baseline vs. optimized power per hour (approved setpoint decisions)."""
+        """Optimizer's predicted baseline vs. optimized power per hour (approved decisions, executed or not)."""
         return self._rows(f"""
             WITH now AS (SELECT {SENSOR_NOW} AS t)
             SELECT date_trunc('hour', created_at) AS hour, zone_id, count(*) AS decisions,
                    avg((parameters->>'predicted_power_baseline_kw')::float) AS baseline_kw,
                    avg((parameters->>'predicted_power_optimized_kw')::float) AS optimized_kw
             FROM optimization_actions, now
-            WHERE source = 'optimizer' AND status = 'approved' AND parameters ? 'predicted_power_baseline_kw'
+            WHERE source = 'optimizer' AND status IN ('approved', 'executed')
+              AND parameters ? 'predicted_power_baseline_kw'
               AND created_at > now.t - %s * interval '1 hour' AND created_at <= now.t
             GROUP BY 1, 2 ORDER BY 1, 2""", (_hours(hours, 24),))
 

@@ -71,8 +71,11 @@ dashboard. Their output goes to `logs\stack\<service>.log`. The same thing witho
 python -m scripts.run_stack --mode advisory --mock-external
 ```
 
-Open **http://127.0.0.1:5000**. The simulation starts *paused* at 9 February 2026, so press
-**Start**. The simulation runs 300× faster than real time: one simulated hour takes 12 seconds.
+Open **http://127.0.0.1:5000**. The simulation starts *paused*, so press **Start**. The simulation
+runs 300× faster than real time: one simulated hour takes 12 seconds.
+
+The first run starts at 9 February 2026. Each later start continues right after the last stored
+reading (the start window prints `continuing from ...`), so runs never overlap in the charts.
 
 **Stop:** press Ctrl+C in the start window, which stops every service gracefully. Then run
 `scripts\windows\stop.bat`, which stops the containers and keeps the data.
@@ -137,5 +140,6 @@ python -m pytest -m "not kafka and not postgres"   # without Docker
 | Dashboard shows "Data unavailable" | PostgreSQL down; the page recovers by itself once it is back |
 | No charts or icons | the browser cannot reach the CDNs (offline) |
 | Many false alerts in closed loop | expected in zones the agent returned to the baseline schedule (Module 11 finding); advisory mode avoids it |
+| `external_data_publisher` keeps restarting | `CARBON_PROVIDER=electricitymaps` without `ELECTRICITY_MAPS_API_KEY`; preflight now reports it. Set the key, set `CARBON_PROVIDER=mock`, or start with `-MockExternal` |
 | A service keeps restarting | read `logs\stack\<service>.log`; the supervisor gives up after 3 restarts |
 | `ExecutionPolicy` error | use the `.bat` files, or `powershell -ExecutionPolicy Bypass -File ...` |

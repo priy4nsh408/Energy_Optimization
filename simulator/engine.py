@@ -47,7 +47,6 @@ class BuildingSimulator:
         # Independent random streams so that, e.g., sensor noise does not
         # change the physics when the number of sensors changes.
         self._physics_rng = random.Random(f"{seed}:physics")
-        self._event_rng = random.Random(f"{seed}:event-ids")
         outdoor = OutdoorModel(
             latitude_deg=settings.latitude_deg,
             annual_mean_c=settings.outdoor_annual_mean_c,
@@ -60,6 +59,10 @@ class BuildingSimulator:
         self.sensors = SensorModel(random.Random(f"{seed}:sensors"))
 
         start = settings.start_time or datetime.now(settings.tzinfo).replace(microsecond=0)
+        # Event ids depend on the start time as well as the seed: runs that start at different simulated
+        # times (e.g. the bootstrap history and a live run) must not produce the same ids, or the
+        # database's duplicate check would silently drop the later run's readings.
+        self._event_rng = random.Random(f"{seed}:{start.isoformat()}:event-ids")
         # Run one warm-up physics step ending at the start time, so outdoor
         # conditions and occupancy exist before the first reading.
         warmup_s = min(settings.physics_step_seconds, settings.simulated_seconds_per_tick)

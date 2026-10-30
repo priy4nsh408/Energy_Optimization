@@ -2,41 +2,85 @@
 {% block title %}Security Monitoring{% endblock %}
 {% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='css/security.css') }}">{% endblock %}
 {% block content %}
-<h1 class="h4 mb-3"><i class="bi bi-shield-lock"></i> Security Monitoring</h1>
+<div class="page-head">
+  <h1><i class="bi bi-shield-lock"></i> Security monitoring</h1>
+  <p class="lead-sm">Every sensor reading is checked for signs of a cyberattack. Use the panel on the right to launch
+    a simulated attack and watch it being detected.</p>
+</div>
+
+<details class="explain">
+  <summary>How attacks are detected</summary>
+  <div class="row g-3">
+    <div class="col-md-4"><strong><i class="bi bi-rulers"></i> Physics rules</strong><br>
+      Checks that readings obey physics, e.g. a room cannot warm up by 4 °C in five minutes, and CO₂ must rise when
+      people are present.</div>
+    <div class="col-md-4"><strong><i class="bi bi-cpu"></i> ML anomaly detector</strong><br>
+      An Isolation Forest learned what normal readings look like for each zone and flags readings that are very
+      unlike them.</div>
+    <div class="col-md-4"><strong><i class="bi bi-graph-up-arrow"></i> Drift test</strong><br>
+      Compares the last 6 hours of readings with the training data, to catch changes too slow for the other two checks.</div>
+  </div>
+  <p class="mt-2">An alert is only a suspicion. The AI agent then re-checks it (see the <em>AI Agent</em> page).</p>
+</details>
+
 <div class="row g-3 mb-3">
-  <div class="col-12 col-xl-8"><div class="card"><div class="card-header">Alerts per hour by classification</div>
+  <div class="col-12 col-xl-8"><div class="card h-100"><div class="card-header"><i class="bi bi-bar-chart"></i> Alerts per hour <span class="hint">(simulated time)</span></div>
     <div class="card-body"><div id="chart-timeline" class="chart"></div></div></div></div>
   <div class="col-12 col-xl-4">{% include "_controls.html" %}</div>
 </div>
 
+<div class="card mb-3"><div class="card-header"><i class="bi bi-book"></i> Alert types explained</div>
+  <div class="card-body"><div class="legend-grid" id="class-legend"></div></div></div>
+
 <div class="row g-3 mb-3">
-  <div class="col-12 col-xl-7"><div class="card"><div class="card-header">Simulated attacks and their detection</div>
-    <div class="card-body p-0"><div class="table-responsive"><table class="table table-sm table-hover mb-0 small">
-      <thead><tr><th>Requested</th><th>Type</th><th>Zone</th><th>Sim. window</th><th>Params</th><th>Readings manipulated</th><th>Alerts</th><th>First alert (latency)</th></tr></thead>
-      <tbody id="attack-table"><tr><td colspan="8" class="text-muted">No simulated attacks</td></tr></tbody></table></div></div></div></div>
-  <div class="col-12 col-xl-5"><div class="card"><div class="card-header">Isolated sensors (agent quarantine)</div>
+  <div class="col-12 col-xl-8"><div class="card h-100"><div class="card-header"><i class="bi bi-bug"></i> Simulated attacks and whether they were caught</div>
+    <div class="card-body p-0"><div class="table-responsive"><table class="table table-hover mb-0 small">
+      <thead><tr><th>Attack</th><th>Zone</th><th>When (sim.)</th><th>Readings faked</th><th>Alerts</th><th>Detected?</th></tr></thead>
+      <tbody id="attack-table"><tr><td colspan="6" class="text-muted">No simulated attacks</td></tr></tbody></table></div></div></div></div>
+  <div class="col-12 col-xl-4"><div class="card h-100"><div class="card-header"><i class="bi bi-slash-circle"></i> Quarantined sensors</div>
+    <div class="card-body small text-muted pb-0">Sensors the AI agent no longer trusts. The building ignores them until
+      the zone has been quiet for an hour.</div>
     <ul class="list-group list-group-flush small" id="isolated-list"><li class="list-group-item text-muted">None</li></ul></div></div>
 </div>
 
-<div class="row g-3 mb-3">
-  <div class="col-12"><div class="card"><div class="card-header">Data drift and security drift (KS test + PSI per window)</div>
-    <div class="card-body"><div id="chart-drift" class="chart"></div>
-      <p class="small text-muted mb-0"><strong>Security drift</strong>: physical-consistency residuals shifted (possible gradual
-        manipulation). <strong>Data drift</strong>: inputs differ from the training period (season/usage) — affects model
-        validity, not evidence of an attack.</p></div></div></div>
-</div>
-
-<div class="card"><div class="card-header d-flex flex-wrap justify-content-between gap-2">
-  <span>Anomaly alerts</span>
-  <div class="d-flex gap-2">
-    <select id="filter-type" class="form-select form-select-sm w-auto">
-      <option value="">all types</option><option>attack</option><option>anomaly</option><option>drift</option><option>validation</option>
-    </select>
-    <select id="filter-zone" class="form-select form-select-sm w-auto"><option value="">all zones</option>
-      {% for id, name, type in zones %}<option value="{{ id }}">{{ id }}</option>{% endfor %}</select>
+<div class="card mb-3"><div class="card-header"><i class="bi bi-activity"></i> Slow changes over time (drift)</div>
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-12 col-xxl-8"><div id="chart-drift" class="chart"></div></div>
+      <div class="col-12 col-xxl-4 small">
+        <p class="mb-2">Each dot is a 6-hour window of readings from one zone that looked clearly different from the data the
+          detectors were trained on. Hover over a dot for details.</p>
+        <div class="mb-2"><strong>◆ Diamonds: security drift (possible attack).</strong>
+          Relationships that should never change have shifted, e.g. CO₂ no longer matches the number of people.
+          This can mean someone is manipulating the sensors slowly.</div>
+        <div class="mb-2"><strong>● Circles: data drift (not an attack).</strong>
+          Ordinary values (temperature, humidity, CO₂, power) differ from the training period, usually because of
+          the season or a change in usage. The ML model may get less accurate and should be retrained.</div>
+        <p class="mb-2">The colour shows which measurement changed.</p>
+        <p class="mb-1"><strong>PSI (height of the dot)</strong> measures how much the spread of values changed:</p>
+        <ul class="mb-2 ps-3">
+          <li><span class="band band-ok"></span> below 0.1: no real change</li>
+          <li><span class="band band-warn"></span> 0.1–0.25: small change</li>
+          <li><span class="band band-bad"></span> above 0.25 (red dashed line): significant change</li>
+        </ul>
+        <p class="mb-0"><strong>KS test p-value</strong> is the chance that a difference this large is pure luck. A tiny
+          value such as 5e-17 (0.000…005) means the change is certainly real.</p>
+      </div>
+    </div>
   </div></div>
-  <div class="card-body p-0"><div class="table-responsive"><table class="table table-sm table-hover mb-0 small">
-    <thead><tr><th>Detected (sim.)</th><th>Zone</th><th>Severity</th><th>Type</th><th>Classification</th><th>Detector</th><th>Description</th><th>Evidence</th></tr></thead>
-    <tbody id="alert-table"><tr><td colspan="8" class="text-muted">Loading…</td></tr></tbody></table></div></div></div>
+
+<div class="card"><div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+  <span><i class="bi bi-list-ul"></i> All alerts</span>
+  <div class="d-flex gap-2">
+    <select id="filter-type" class="form-select form-select-sm w-auto" aria-label="Alert type">
+      <option value="">all types</option><option value="attack">attacks</option><option value="anomaly">unusual readings</option>
+      <option value="drift">drift</option><option value="validation">invalid messages</option>
+    </select>
+    <select id="filter-zone" class="form-select form-select-sm w-auto" aria-label="Zone"><option value="">all zones</option>
+      {% for id, name, type in zones %}<option value="{{ id }}">{{ id }} · {{ name }}</option>{% endfor %}</select>
+  </div></div>
+  <div class="card-body p-0"><div class="table-responsive scroll-table"><table class="table table-hover mb-0 small">
+    <thead><tr><th>When (sim.)</th><th>Zone</th><th>What</th><th>Severity</th><th>Detected by</th><th>Evidence, in plain words</th></tr></thead>
+    <tbody id="alert-table"><tr><td colspan="6" class="text-muted">Loading…</td></tr></tbody></table></div></div></div>
 {% endblock %}
 {% block scripts %}<script src="{{ url_for('static', filename='js/security.js') }}"></script>{% endblock %}

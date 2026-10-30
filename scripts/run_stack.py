@@ -12,8 +12,11 @@ stops them all. Works on Windows and Linux. ``scripts.preflight`` runs first
 and blocks the start if Kafka, PostgreSQL, the schema or a model is missing
 (``python -m scripts.bootstrap`` prepares everything once).
 
-The simulation starts paused at ``--start`` (default 2026-02-09, inside the
-security detectors' training season); press Start on the dashboard.
+The simulation starts paused; press Start on the dashboard. Without
+``--start`` it begins on 2026-02-09 (inside the security detectors' training
+season) or, if the database already holds later data from an earlier run,
+right after that data, so restarts continue the timeline instead of
+overlapping it.
 """
 
 from __future__ import annotations
@@ -24,10 +27,12 @@ import signal
 import subprocess
 import sys
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from config import BASE_DIR
 
+DEFAULT_START = "2026-02-09T00:00:00+00:00"
 SERVICES: dict[str, list[str]] = {
     "sensor_persistence": [],
     "energy_processor": [],
@@ -45,7 +50,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="python -m scripts.run_stack", description=__doc__.splitlines()[0])
     parser.add_argument("--only", help="comma-separated subset of: " + ", ".join(SERVICES))
     parser.add_argument("--no-dashboard", action="store_true")
-    parser.add_argument("--start", default="2026-02-09T00:00+00:00", help="simulated start time")
+    parser.add_argument("--start", help=f"simulated start time (default {DEFAULT_START} or after the stored data)")
     parser.add_argument("--interval", type=float, default=1.0, help="seconds between readings")
     parser.add_argument("--speed", type=float, default=300.0, help="simulated seconds per real second")
     parser.add_argument("--seed", type=int, default=2026)
@@ -56,6 +61,36 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-restarts", type=int, default=3, help="per service (default 3)")
     parser.add_argument("--skip-preflight", action="store_true")
     return parser.parse_args(argv)
+
+
+def continue_after_stored_data(step_s: float) -> str:
+    """Start time for the simulation: DEFAULT_START, or one step after the latest stored reading.
+
+    Reusing simulated dates that are already stored would mix two runs in the same hours of every
+    chart and aggregate, so a restart continues where the previous run stopped.
+    """
+    from config import get_config
+    from database.db import Database
+
+    default = datetime.fromisoformat(DEFAULT_START)
+    try:
+        database = Database(get_config().DATABASE, name="run_stack")
+        database.open(timeout_s=10)
+        try:
+            with database.transaction() as conn:
+                latest = conn.execute("SELECT greatest((SELECT max(event_time) FROM sensor_readings), "
+                                      "(SELECT max(event_time) FROM energy_records))").fetchone()[0]
+        finally:
+            database.close()
+    except Exception as exc:  # noqa: BLE001 - preflight reports database problems
+        print(f"could not read the latest stored reading ({exc}); starting at {DEFAULT_START}", flush=True)
+        return DEFAULT_START
+    if latest is None or latest < default:
+        return DEFAULT_START
+    start = latest + timedelta(seconds=step_s)
+    print(f"database already holds simulated data up to {latest.isoformat()}; continuing from "
+          f"{start.isoformat()}", flush=True)
+    return start.isoformat()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -77,7 +112,8 @@ def main(argv: list[str] | None = None) -> int:
         if subprocess.run([sys.executable, "-m", "scripts.preflight"], cwd=BASE_DIR, env=env).returncode != 0:
             print("Preflight failed: fix the problems above (or run python -m scripts.bootstrap).", file=sys.stderr)
             return 2
-    simulation = ["--start", args.start, "--interval", str(args.interval), "--speed", str(args.speed),
+    start = args.start or continue_after_stored_data(args.interval * args.speed)
+    simulation = ["--start", start, "--interval", str(args.interval), "--speed", str(args.speed),
                   "--seed", str(args.seed), *(["--autostart"] if args.autostart else [])]
     commands = {n: [sys.executable, "-m", f"workers.{n}", *SERVICES[n],
                     *(simulation if n == "simulation_manager" else [])] for n in names}

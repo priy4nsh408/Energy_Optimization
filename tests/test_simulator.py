@@ -55,6 +55,17 @@ def test_tick_emits_one_complete_event_per_zone():
     assert len({e["outdoor_temperature_c"] for e in events}) == 1
 
 
+def test_event_ids_are_reproducible_but_differ_between_start_times():
+    """A live run must not reuse the ids of stored history (the duplicate check would drop its readings)."""
+    def ids(start):
+        sim = BuildingSimulator(make_settings(random_seed=2026, start_time=start))
+        return [e["event_id"] for _ in range(3) for e in sim.tick()]
+
+    history, live = datetime(2026, 1, 5, tzinfo=timezone.utc), datetime(2026, 2, 9, tzinfo=timezone.utc)
+    assert ids(live) == ids(live)
+    assert not set(ids(history)) & set(ids(live))
+
+
 def test_timestamps_follow_speed_factor_and_sequences_increment():
     sim = BuildingSimulator(make_settings(interval_seconds=2, speed_factor=60))
     first, second = sim.tick(), sim.tick()

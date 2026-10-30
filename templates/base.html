@@ -10,7 +10,7 @@
   {% block head %}{% endblock %}
 </head>
 <body>
-<nav class="navbar navbar-expand-lg navbar-dark bg-dark sticky-top">
+<nav class="navbar navbar-expand-lg navbar-dark sb-nav sticky-top">
   <div class="container-fluid">
     <a class="navbar-brand" href="{{ url_for('pages.index') }}"><i class="bi bi-building-gear"></i> Smart Building</a>
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav"
@@ -28,7 +28,7 @@
       </ul>
       <div class="d-flex align-items-center gap-3 text-light small">
         <span id="sim-state" class="badge text-bg-secondary" title="Simulation state">simulation: unknown</span>
-        <span id="sim-time" title="Latest simulated reading">—</span>
+        <span title="Simulated time of the latest stored reading"><i class="bi bi-clock"></i> <span id="sim-time">—</span></span>
         <span id="live-indicator" class="live-dot offline" title="Live updates"></span>
       </div>
     </div>
@@ -54,12 +54,14 @@
     buildingId: {{ building_id | tojson }},
     attackParameters: {{ attack_parameters | tojson }},
     maxAttackMinutes: {{ max_attack_minutes | tojson }},
-    zones: {{ zones | tojson }}
+    zones: {{ zones | tojson }},
+    controlMode: {{ control_mode | tojson }}
   };
 </script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script src="{{ url_for('static', filename='js/glossary.js') }}"></script>
 <script src="{{ url_for('static', filename='js/streaming.js') }}"></script>
 <script src="{{ url_for('static', filename='js/charts.js') }}"></script>
 {% block scripts %}{% endblock %}

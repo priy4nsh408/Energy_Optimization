@@ -15,6 +15,7 @@
           {% for type in attack_parameters %}<option value="{{ type }}">{{ type | replace('_', ' ') }}</option>{% endfor %}
         </select>
       </div>
+      <div class="col-12 form-text mt-0" id="attack-help"></div>
       <div class="col-6 col-sm-3">
         <label class="form-label small mb-0" for="attack-zone">Zone</label>
         <select class="form-select form-select-sm" id="attack-zone" name="zone_id">
