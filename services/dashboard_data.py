@@ -115,11 +115,11 @@ class DashboardData:
         return readings
 
     def isolated_sensors(self) -> list[dict[str, Any]]:
-        """Sensors whose latest executed isolate/restore action is an isolation."""
+        """Sensors whose latest executed isolate/restore action is an isolation (since = simulated time)."""
         return self._rows("""
-            SELECT zone_id, sensor, updated_at AS since, reason FROM (
+            SELECT zone_id, sensor, created_at AS since, reason FROM (
                 SELECT DISTINCT ON (zone_id, parameters->>'sensor') zone_id, parameters->>'sensor' AS sensor,
-                       action_type, updated_at, reason
+                       action_type, created_at, updated_at, reason
                 FROM optimization_actions
                 WHERE action_type IN ('isolate_sensor', 'restore_sensor') AND status = 'executed'
                 ORDER BY zone_id, parameters->>'sensor', updated_at DESC) latest
