@@ -152,6 +152,11 @@ def _time(event: dict[str, Any]) -> datetime:
     return datetime.fromisoformat(str(event["timestamp"]))
 
 
+def _history_hours(events: list[dict[str, Any]]) -> float:
+    """Hours of readings available to the replayed detectors (less than ~24 h makes them unreliable)."""
+    return round((_time(events[-1]) - _time(events[0])).total_seconds() / 3600, 1) if events else 0.0
+
+
 class AgentToolbox:
     def __init__(self, data: BuildingDataSource, isolation: SensorIsolationRegistry, validator: SafetyValidator,
                  optimizer: ZoneOptimizer, security_models: SecurityModels | None = None) -> None:
@@ -318,7 +323,8 @@ class AgentToolbox:
                 flagged_times.append(event["timestamp"])
                 for hit in detection.hits:
                     rules[hit.rule] = rules.get(hit.rule, 0) + 1
-        return {"zone_id": zone, "readings_evaluated": evaluated, "flagged": len(flagged_times),
+        return {"zone_id": zone, "history_hours": _history_hours(events),
+                "readings_evaluated": evaluated, "flagged": len(flagged_times),
                 "flagged_by_type": by_type, "rules_triggered": dict(sorted(rules.items(), key=lambda kv: -kv[1])[:8]),
                 "first_flagged": flagged_times[0] if flagged_times else None,
                 "last_flagged": flagged_times[-1] if flagged_times else None,
@@ -344,7 +350,7 @@ class AgentToolbox:
                                          "psi": round(f.psi, 3), "mean_shift": round(f.mean_shift, 3)}
                                         for f in latest.features]}
 
-        return {"zone_id": zone, "readings": len(outputs),
+        return {"zone_id": zone, "readings": len(outputs), "history_hours": _history_hours(events),
                 "security_drift": describe(o.drift for o in outputs),
                 "data_drift": describe(o.data_drift for o in outputs),
                 "interpretation": "security drift = physical-consistency residuals shifted (possible gradual "

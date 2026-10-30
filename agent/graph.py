@@ -52,7 +52,8 @@ How to work:
 1. Investigate before acting. Use the read tools to check the alerted zone's sensor and energy data, \
 weather and carbon intensity, and re-run anomaly detection and/or drift analysis. Compare with other \
 zones where useful. Detectors produce false alarms, so consider normal explanations (weather, occupancy, \
-schedules) as well as attacks and sensor faults.
+schedules) as well as attacks and sensor faults. Detector results based on less than about 24 hours \
+of history (see history_hours) are unreliable (cold start).
 2. Diagnose the most likely cause from the evidence, and state your confidence honestly.
 3. Explain the energy impact (kWh, kW, emissions, quantified from tool results where possible) and the \
 operational impact (comfort, equipment, data quality).

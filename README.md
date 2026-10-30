@@ -19,7 +19,8 @@ building_sensor_data ──► [prediction_service] ──► energy_predictions
 sensor data + energy_predictions + carbon ──► [optimization_service] ──► optimization_commands ──► [record_persistence]
 building_sensor_data ──► [security_service] ──► security_alerts ──► [agent_service: LangGraph agent ─► safety validator]
          ──► optimization_commands (approved) ──► [sensor_publisher --apply-commands] ──► simulator ──► agent_actions
-         Flask + Socket.IO dashboard ◄── dashboard bridge (Kafka → Socket.IO) + PostgreSQL history
+Flask + Socket.IO dashboard ◄── PostgreSQL (all processed data; polled for live push)
+dashboard controls ──► simulation_control ──► [simulation_manager] ──► building_sensor_data (start/stop/attacks)
 ```
 
 Design rules:
@@ -36,6 +37,7 @@ Design rules:
 | `utils/logging_config.py` | Structured JSON/text logging, one log file per service |
 | `app.py` | Flask application factory (wiring only) |
 | `scripts/check_environment.py` | Verifies Python, packages, configuration and service connectivity |
+| `scripts/run_stack.py` | Starts every worker plus the dashboard as separate processes (development helper) |
 | `simulator/` | Five-zone building physics, occupancy, outdoor climate, sensor and attack simulation |
 | `docs/sample_output/` | Sample simulator output (JSON Lines) |
 | `streaming/` | Kafka topic registry, JSON producer/consumer, connection helpers (named `streaming` so it does not shadow Kafka client libraries) |
@@ -48,7 +50,8 @@ Design rules:
 | `optimization/` | Deterministic SciPy HVAC/lighting optimizer, energy model, lighting rules, constraints/validator |
 | `security/` | Rule-based validation, Isolation Forest, KS/PSI drift detection, attack classification, alerts, training |
 | `agent/` | Agentic AI: LangGraph incident agent, tools, LLM providers, deterministic safety validator, simulated execution, decision records |
-| `routes/`, `templates/`, `static/` | Dashboard |
+| `routes/`, `templates/`, `static/` | Flask dashboard: pages, JSON API, Bootstrap/Plotly/Socket.IO front end |
+| `services/` | Dashboard service layer: PostgreSQL queries, simulation-control publisher, live-update poller |
 | `experiments/` | Closed-loop baseline vs. optimized comparison; labelled cyberattack evaluation |
 | `docker/` | Kafka and PostgreSQL containers |
 | `tests/` | Unit tests (pytest) |
@@ -910,6 +913,85 @@ The Claude path is covered by unit tests with a mocked client (request shape, pa
 truncation handling, fallback to the offline policy). It has not been run against the live API in
 this environment.
 
+## Web dashboard (Flask, Bootstrap, Plotly.js, Socket.IO)
+
+Four responsive pages:
+
+| Page | Shows |
+|---|---|
+| **Dashboard** (`/`) | KPIs (building power, energy and CO₂e for the last 24 h, open alerts), live readings per zone (temperature, setpoint, CO₂, occupancy, light, power breakdown, isolated sensors), live power chart, latest alerts and agent decision, simulation controls |
+| **Energy Analytics** (`/energy`) | Hourly energy by zone, carbon emissions per hour, ML predictions vs. measured power with MAE/RMSE per zone, baseline vs. optimized: the measured closed-loop experiment and the live optimizer decisions |
+| **Security Monitoring** (`/security`) | Alerts per hour by classification, simulated attacks with readings manipulated, alerts and detection latency, isolated sensors, drift (security vs. data drift, PSI per feature), filterable alert table with evidence |
+| **Agentic AI Activity** (`/agent`) | Each agent decision: diagnosis, cause, confidence, energy and operational impact, recommendations, tools called, proposed actions with the safety verdict, and the result reported by the simulator; full corrective-action history |
+
+![Dashboard](docs/screenshots/dashboard.png)
+
+More screenshots are in `docs/screenshots/`, including a phone-width view.
+
+**How data reaches the browser.** Flask never consumes Kafka.
+
+- *Reads:* `services/dashboard_data.py` queries PostgreSQL, which the workers fill. The pages load
+  their data from a JSON API (`/api/...`).
+- *Live updates:* `services/live_updates.py` is a single Socket.IO background task. It polls
+  PostgreSQL every `DASHBOARD_POLL_INTERVAL_S` and pushes only what is new (`status`, `readings`,
+  `alerts`, `decisions`, `actions`).
+- *Time windows:* they are in simulated time and anchored on the most recently *stored* data, so the
+  dashboard follows the current run even when the database holds older runs.
+- *Without PostgreSQL:* the API answers 503 and the pages show a banner.
+
+**Simulation controls.** Start, Stop and "Trigger attack" *publish* a validated command to the
+`simulation_control` topic. `workers.simulation_manager` executes it:
+
+- It is a long-running, remote-controlled simulator: Stop pauses simulated time.
+- An attack manipulates one zone's readings starting with the next reading.
+- It applies approved agent commands, just like `sensor_publisher --apply-commands`.
+- It stores its state and the attacks in PostgreSQL (schema v4: `simulation_status`,
+  `simulated_attacks`).
+
+Control safeguards:
+
+- Commands are validated against a contract: attack type, zone, duration from 5 minutes to 24 h,
+  and per-type parameter ranges.
+- The API accepts JSON POSTs only, so cross-site form posts are rejected.
+- Commands older than 10 minutes are ignored.
+- Controls are off in production unless `DASHBOARD_CONTROLS_ENABLED=true`.
+
+**Run everything:**
+
+```powershell
+python -m database init                          # schema v4
+python -m scripts.run_stack --mock-external      # all workers + dashboard; logs in logs/stack/
+# open http://127.0.0.1:5000 and press Start (the simulation starts paused on 2026-02-09)
+```
+
+To run only the dashboard against an existing database: `python app.py`.
+
+The pages load Bootstrap 5.3.3, Bootstrap Icons 1.11.3, Plotly.js 2.35.2 and the Socket.IO client
+4.7.5 from public CDNs, so the browser needs internet access.
+
+**Verified end to end** (full stack, offline agent policy, fresh database):
+
+- The simulation was started, and four attacks were triggered through the web form: temperature
+  spoofing in Z1, abnormal power in Z4, a replay in Z2 and hidden occupancy in Z3.
+- *Detection:* first alerts came 0, 0, 5 and 5 minutes after the attacks started.
+- *Containment:* the agent isolated the attacked sensors and returned those zones to their
+  baseline schedule. The simulator executed the commands and reported back.
+- *Controls:* Stop froze simulated time and Start resumed it.
+- *Errors:* no browser console errors and no service errors.
+- *Inherited from Module 8:* Z3's power meter was also isolated, because hidden occupancy is first
+  classified as `abnormal_power`.
+
+**Fixes found during this integration (Module 9 code):**
+
+1. *Cold start.* Detectors re-run on less than 24 h of history are not trusted.
+   - Before this fix, the agent service isolated sensors in three zones that were not under attack
+     during the first simulated day.
+   - The tools now report `history_hours`, and the offline playbook takes no action with less than
+     24 h of history.
+   - The `agent.demo` results are unchanged.
+2. *Action history.* When an action's status advances, its parameters are now merged, so the
+   simulator's execution result is kept.
+
 ## Verify the environment
 
 ```powershell
@@ -936,7 +1018,7 @@ See `docs/PROGRESS.md` for the handoff notes: current state, how to resume, rege
 | 7 | HVAC/lighting optimisation (SciPy) | ✅ Done |
 | 8 | Cyberattack simulation, anomaly and drift detection | ✅ Done |
 | 9 | Agentic AI (LangGraph), safety layer and simulated action execution | ✅ Done |
-| 10 | Real-time dashboard | ⏳ Next |
-| 11 | Experiments and evaluation | Planned |
+| 10 | Flask web dashboard (live, Plotly, Socket.IO, simulation controls) | ✅ Done |
+| 11 | Experiments and evaluation | ⏳ Next |
 
 Measured results are in `docs/results/` (generated by the commands shown in each section).

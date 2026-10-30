@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Energy Analytics{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+  <h1 class="h4 mb-0"><i class="bi bi-lightning-charge"></i> Energy Analytics</h1>
+  <div class="d-flex align-items-center gap-2">
+    <label for="hours" class="small text-muted">Window (simulated hours)</label>
+    <select id="hours" class="form-select form-select-sm w-auto">
+      <option>6</option><option>12</option><option selected>24</option><option>48</option><option>168</option>
+    </select>
+  </div>
+</div>
+
+<div class="row g-3 mb-3" id="energy-kpis"></div>
+
+<div class="row g-3 mb-3">
+  <div class="col-12 col-xl-7"><div class="card"><div class="card-header">Hourly energy consumption by zone (kWh)</div>
+    <div class="card-body"><div id="chart-hourly" class="chart"></div></div></div></div>
+  <div class="col-12 col-xl-5"><div class="card"><div class="card-header">Carbon emissions per hour (kg CO₂e)</div>
+    <div class="card-body"><div id="chart-carbon" class="chart"></div>
+      <p class="small text-muted mb-0" id="carbon-note"></p></div></div></div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-12 col-xl-8"><div class="card"><div class="card-header d-flex flex-wrap justify-content-between gap-2">
+      <span>Energy predictions vs. measured power (ML, next interval)</span>
+      <select id="pred-zone" class="form-select form-select-sm w-auto">
+        {% for id, name, type in zones %}<option value="{{ id }}">{{ id }} · {{ name }}</option>{% endfor %}
+      </select></div>
+    <div class="card-body"><div id="chart-predictions" class="chart"></div></div></div></div>
+  <div class="col-12 col-xl-4"><div class="card h-100"><div class="card-header">Prediction accuracy (all stored predictions)</div>
+    <div class="card-body p-0"><div class="table-responsive"><table class="table table-sm mb-0">
+      <thead><tr><th>Zone</th><th>n</th><th>MAE kW</th><th>RMSE kW</th><th>Mean kW</th></tr></thead>
+      <tbody id="accuracy-table"><tr><td colspan="5" class="text-muted">—</td></tr></tbody></table></div></div></div></div>
+</div>
+
+<div class="row g-3">
+  <div class="col-12 col-xl-6"><div class="card"><div class="card-header">Baseline vs. optimized — measured closed-loop experiment</div>
+    <div class="card-body"><div id="chart-comparison" class="chart"></div>
+      <div class="table-responsive"><table class="table table-sm small mb-0">
+        <thead><tr><th>Case</th><th>Scenario</th><th>kWh</th><th>Saving</th><th>kg CO₂e</th><th>Comfort</th><th>Peak kW</th></tr></thead>
+        <tbody id="comparison-table"><tr><td colspan="7" class="text-muted">—</td></tr></tbody></table></div>
+      <p class="small text-muted mb-0" id="comparison-note"></p></div></div></div>
+  <div class="col-12 col-xl-6"><div class="card"><div class="card-header">Baseline vs. optimized — live optimizer decisions (predicted power)</div>
+    <div class="card-body"><div id="chart-optimizer" class="chart"></div>
+      <p class="small text-muted mb-0">Average predicted building power per hour for approved optimizer decisions:
+        baseline setpoints vs. the optimizer's choice (model predictions, not measurements).</p></div></div></div>
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/energy.js') }}"></script>{% endblock %}

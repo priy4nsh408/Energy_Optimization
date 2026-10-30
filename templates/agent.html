@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Agentic AI Activity{% endblock %}
+{% block content %}
+<h1 class="h4 mb-3"><i class="bi bi-robot"></i> Agentic AI Activity</h1>
+<div class="row g-3 mb-3">
+  <div class="col-12 col-lg-5"><div class="card h-100"><div class="card-header">Actions by source and outcome (log scale)</div>
+    <div class="card-body"><div id="chart-actions" class="chart chart-sm"></div></div></div></div>
+  <div class="col-12 col-lg-7"><div class="card h-100"><div class="card-header">How decisions are made</div>
+    <div class="card-body small">
+      <ol class="mb-2">
+        <li>An alert arrives → the agent gathers sensor, energy, weather/carbon data and re-runs the detectors (tools).</li>
+        <li>It diagnoses the cause and explains the energy and operational impact.</li>
+        <li>It <em>proposes</em> actions; a deterministic <strong>safety validator</strong> approves or rejects each one.</li>
+        <li>Only approved actions run — on the <strong>simulator</strong> — and everything is recorded.</li>
+      </ol>
+      <p class="mb-0 text-muted">Provider <code>offline</code> = deterministic rule-based playbook (no LLM);
+        <code>anthropic</code> = Claude. If the LLM fails, the record shows the fallback.</p>
+    </div></div></div>
+</div>
+
+<div class="card mb-3"><div class="card-header">Agent explanations (latest first)</div>
+  <div class="card-body" id="decision-list"><p class="text-muted mb-0">Loading…</p></div></div>
+
+<div class="card"><div class="card-header d-flex flex-wrap justify-content-between gap-2">
+  <span>Corrective action history</span>
+  <select id="filter-source" class="form-select form-select-sm w-auto">
+    <option value="">all sources</option><option value="agent" selected>agent</option><option>optimizer</option><option>operator</option>
+  </select></div>
+  <div class="card-body p-0"><div class="table-responsive"><table class="table table-sm table-hover mb-0 small">
+    <thead><tr><th>Updated</th><th>Zone</th><th>Source</th><th>Action</th><th>Parameters</th><th>Status</th><th>Reason</th><th>Safety validator</th></tr></thead>
+    <tbody id="action-table"><tr><td colspan="8" class="text-muted">Loading…</td></tr></tbody></table></div></div></div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/agent.js') }}"></script>{% endblock %}

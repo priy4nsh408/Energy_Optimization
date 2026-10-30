@@ -13,21 +13,25 @@ from __future__ import annotations
 
 import logging
 
-from flask import Flask, jsonify
+from flask import Flask, current_app, jsonify
 from flask_socketio import SocketIO
 
 from config import BaseConfig, get_config
+from routes import register_blueprints
+from services.live_updates import LiveUpdater
+from services.registry import DashboardServices
 from utils.logging_config import configure_logging
 
 socketio = SocketIO()
 logger = logging.getLogger(__name__)
 
 
-def create_app(config: BaseConfig | None = None) -> Flask:
+def create_app(config: BaseConfig | None = None, *, services: DashboardServices | None = None) -> Flask:
     """Application factory.
 
     Args:
         config: Configuration object; defaults to :func:`config.get_config`.
+        services: Data/control services (tests inject their own); created lazily otherwise.
     """
     config = config or get_config()
     configure_logging(config.LOGGING, service_name="web")
@@ -43,6 +47,11 @@ def create_app(config: BaseConfig | None = None) -> Flask:
         cors_allowed_origins=config.SOCKETIO_CORS_ALLOWED_ORIGINS,
     )
 
+    services = services or DashboardServices(config)
+    app.extensions["dashboard_services"] = services
+    app.extensions["live_updater"] = LiveUpdater(socketio, services.data, config.DASHBOARD.poll_interval_s)
+    register_blueprints(app)
+
     @app.get("/health")
     def health():
         """Liveness check: confirms the app started with a valid configuration."""
@@ -50,6 +59,13 @@ def create_app(config: BaseConfig | None = None) -> Flask:
 
     logger.info("Flask application created", extra={"config": config.summary()})
     return app
+
+
+@socketio.on("connect")
+def _on_connect(auth=None):
+    """Start the (single) live-update task when the first browser connects."""
+    if not current_app.testing:
+        current_app.extensions["live_updater"].ensure_started()
 
 
 if __name__ == "__main__":

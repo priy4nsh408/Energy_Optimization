@@ -104,6 +104,8 @@ def upsert_optimization_action(conn: psycopg.Connection, record: OptimizationAct
         "updated_at = EXCLUDED.updated_at, "
         "safety_reason = COALESCE(EXCLUDED.safety_reason, optimization_actions.safety_reason), "
         "reason = COALESCE(EXCLUDED.reason, optimization_actions.reason), "
+        # Later stages add details (e.g. the simulator's execution result); newer keys win.
+        "parameters = optimization_actions.parameters || EXCLUDED.parameters, "
         "kafka_topic = EXCLUDED.kafka_topic "
         "WHERE {incoming} > {existing} RETURNING (xmax = 0) AS inserted"
     ).format(incoming=_rank_case(incoming, ACTION_STATUS_RANK),

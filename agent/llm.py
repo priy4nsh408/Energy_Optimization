@@ -145,6 +145,7 @@ DRIFT_FEATURE_SENSOR = {"control_error": "temperature", "temp": "temperature", "
                         "occupancy": "occupancy", "power": "power_meter"}
 OFFLINE_ID = "offline-{turn}-{index}"
 MIN_CONFIRMING_READINGS = 2
+MIN_HISTORY_HOURS = 24.0            # detectors re-run on less history (cold start) are not trusted
 
 
 def _alert_from(messages: list[dict[str, Any]]) -> dict[str, Any]:
@@ -206,7 +207,14 @@ class OfflinePolicy:
         return LLMTurn({"role": "assistant", "content": content}, tool_calls, "", "tool_use")
 
     @staticmethod
-    def _confirmed(classification: str, results: dict[str, dict[str, Any]]) -> bool:
+    def _history_ok(results: dict[str, dict[str, Any]]) -> bool:
+        history = results.get("run_anomaly_detection", {}).get("history_hours")
+        return history is None or history >= MIN_HISTORY_HOURS
+
+    @classmethod
+    def _confirmed(cls, classification: str, results: dict[str, dict[str, Any]]) -> bool:
+        if not cls._history_ok(results):
+            return False
         anomaly = results.get("run_anomaly_detection", {})
         drift = results.get("run_drift_analysis", {})
         if classification in ("gradual_manipulation", "data_drift"):
@@ -298,6 +306,11 @@ class OfflinePolicy:
         if not confirmed:
             recommendations = ["Re-running the detectors did not confirm the alert: treat as a possible false "
                                "alarm and monitor the zone", "No automatic action taken"]
+        if not self._history_ok(results):
+            hours = anomaly.get("history_hours")
+            evidence.append(f"only {hours} h of history: detector results are not reliable yet (cold start)")
+            recommendations[0] = (f"Only {hours} h of readings are available; the detectors need about a day of "
+                                  "history. Monitor the zone; no automatic action taken")
         return {
             "diagnosis": ("; ".join(evidence)) + ("" if confirmed else " - not confirmed on re-analysis"),
             "likely_cause": play["cause"] if confirmed else f"possible false alarm (alert said: {play['cause']})",

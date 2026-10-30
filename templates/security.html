@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Security Monitoring{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='css/security.css') }}">{% endblock %}
+{% block content %}
+<h1 class="h4 mb-3"><i class="bi bi-shield-lock"></i> Security Monitoring</h1>
+<div class="row g-3 mb-3">
+  <div class="col-12 col-xl-8"><div class="card"><div class="card-header">Alerts per hour by classification</div>
+    <div class="card-body"><div id="chart-timeline" class="chart"></div></div></div></div>
+  <div class="col-12 col-xl-4">{% include "_controls.html" %}</div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-12 col-xl-7"><div class="card"><div class="card-header">Simulated attacks and their detection</div>
+    <div class="card-body p-0"><div class="table-responsive"><table class="table table-sm table-hover mb-0 small">
+      <thead><tr><th>Requested</th><th>Type</th><th>Zone</th><th>Sim. window</th><th>Params</th><th>Readings manipulated</th><th>Alerts</th><th>First alert (latency)</th></tr></thead>
+      <tbody id="attack-table"><tr><td colspan="8" class="text-muted">No simulated attacks</td></tr></tbody></table></div></div></div></div>
+  <div class="col-12 col-xl-5"><div class="card"><div class="card-header">Isolated sensors (agent quarantine)</div>
+    <ul class="list-group list-group-flush small" id="isolated-list"><li class="list-group-item text-muted">None</li></ul></div></div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-12"><div class="card"><div class="card-header">Data drift and security drift (KS test + PSI per window)</div>
+    <div class="card-body"><div id="chart-drift" class="chart"></div>
+      <p class="small text-muted mb-0"><strong>Security drift</strong>: physical-consistency residuals shifted (possible gradual
+        manipulation). <strong>Data drift</strong>: inputs differ from the training period (season/usage) — affects model
+        validity, not evidence of an attack.</p></div></div></div>
+</div>
+
+<div class="card"><div class="card-header d-flex flex-wrap justify-content-between gap-2">
+  <span>Anomaly alerts</span>
+  <div class="d-flex gap-2">
+    <select id="filter-type" class="form-select form-select-sm w-auto">
+      <option value="">all types</option><option>attack</option><option>anomaly</option><option>drift</option><option>validation</option>
+    </select>
+    <select id="filter-zone" class="form-select form-select-sm w-auto"><option value="">all zones</option>
+      {% for id, name, type in zones %}<option value="{{ id }}">{{ id }}</option>{% endfor %}</select>
+  </div></div>
+  <div class="card-body p-0"><div class="table-responsive"><table class="table table-sm table-hover mb-0 small">
+    <thead><tr><th>Detected (sim.)</th><th>Zone</th><th>Severity</th><th>Type</th><th>Classification</th><th>Detector</th><th>Description</th><th>Evidence</th></tr></thead>
+    <tbody id="alert-table"><tr><td colspan="8" class="text-muted">Loading…</td></tr></tbody></table></div></div></div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/security.js') }}"></script>{% endblock %}

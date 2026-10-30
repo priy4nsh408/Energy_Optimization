@@ -4,8 +4,8 @@ Status of *Smart Building Energy Optimization Using Real-Time Streaming, Cyberse
 Use this file to continue the work later, alone or in a new Claude session.
 
 - **Branch:** `claude/nifty-brown-uckrlo`
-- **Last completed module:** 9 (agentic AI with LangGraph, safety layer and simulated action execution)
-- **Tests:** 323 passed, with Docker running and the three datasets in `data/raw/`.
+- **Last completed module:** 10 (Flask web dashboard)
+- **Tests:** 365 passed, with Docker running and the three datasets in `data/raw/`.
 
 ## Module status
 
@@ -20,8 +20,8 @@ Use this file to continue the work later, alone or in a new Claude session.
 | 7 | HVAC/lighting optimization | ✅ | `b89ba36`, `9061984` | `optimization/`, `workers.optimization_service`, `python -m experiments.comparison` |
 | 8 | Cybersecurity + drift detection | ✅ | `741c57c` | `simulator/attack_simulator.py`, `security/`, `python -m security.train`, `workers.security_service`, `python -m experiments.cyberattack_experiment` |
 | 9 | Agentic AI (LangGraph) + safety layer + simulated execution | ✅ | see git log | `agent/`, `python -m agent.demo`, `workers.agent_service`, `workers.sensor_publisher --apply-commands` |
-| 10 | Real-time dashboard (Flask-SocketIO) | ⏳ next | | |
-| 11 | Experiments and evaluation | planned | | |
+| 10 | Flask web dashboard | ✅ | see git log | `app.py`, `routes/`, `services/`, `templates/`, `static/`, `workers.simulation_manager`, `python -m scripts.run_stack` |
+| 11 | Experiments and evaluation | ⏳ next | | |
 
 Measured results are in `docs/results/` and summarised in `README.md`.
 
@@ -97,6 +97,14 @@ These are git-ignored, either because they are large or because they are generat
     rule-based playbook, labelled in every record).
   - If the LLM fails, the incident continues with the offline policy and the error is recorded.
   - Sensor isolation is a software quarantine.
+  - The tools report `history_hours`; the offline playbook does not act on less than 24 h of
+    history (cold start).
+- **Dashboard (Module 10).** Flask reads PostgreSQL only.
+  - Live push comes from one Socket.IO background task that polls the database.
+  - Controls are *published* to `simulation_control` and executed by `workers.simulation_manager`.
+  - Windows are anchored on the most recently stored data. Do not reuse the same `--start` dates in
+    one database for separate runs.
+  - `python -m scripts.run_stack --mock-external` starts everything.
 - **Security.** Point anomalies (one reading) are kept separate from drift (a window).
   *Security drift* is distinct from *data drift*. Thresholds are calibrated only on clean data.
 - **Honest evaluation.** Results are never tuned on test data. When a held-out week revealed
@@ -129,20 +137,14 @@ These are git-ignored, either because they are large or because they are generat
    was available in the development environment. Run `python -m agent.demo --provider anthropic`.
 8. **Windows.** Not yet run on Windows; developed and tested on Linux.
 
-## Next step: Module 10 (real-time dashboard)
+## Next step: Module 11 (experiments and evaluation)
 
-Planned scope, to be confirmed before implementing:
+To be scoped with the user. Candidates:
 
-- A Flask + Flask-SocketIO dashboard with Bootstrap and Plotly.js.
-- A Kafka → Socket.IO bridge as a separate process. Flask itself never consumes Kafka.
-- What it shows:
-  - live zone readings and energy;
-  - predictions vs. actuals;
-  - optimizer commands;
-  - security alerts;
-  - agent decisions (diagnosis, actions, safety verdicts);
-  - sensor isolations.
-- History is read from PostgreSQL.
+- A consolidated evaluation report across modules (prediction, optimization, security, agent).
+- Repeated runs or seeds with confidence intervals.
+- Detectors retrained on data recorded with the optimizer in control.
+- A live Claude run of the agent.
 
 ## How to continue with Claude
 
@@ -151,4 +153,4 @@ Start a new session on this repository and branch, and paste:
 > Continue the Smart Building Energy Optimization project on branch `claude/nifty-brown-uckrlo`.
 > Read `docs/PROGRESS.md` and `README.md` first, then inspect the repository. Follow the same
 > working method as before: one module at a time, tests, honest results, commit and push, then stop
-> for approval. Implement Module 10: Real-time dashboard.
+> for approval. Implement Module 11: Experiments and evaluation.

@@ -594,6 +594,29 @@ class AgentSettings:
         )
 
 
+@dataclass(frozen=True)
+class DashboardSettings:
+    """Flask dashboard: live-update polling and simulation controls.
+
+    Flask reads processed data from PostgreSQL only. Live updates come from a
+    Socket.IO background task that polls the database; simulation controls are
+    *published* to Kafka (``simulation_control``) for ``workers.simulation_manager``.
+    """
+
+    poll_interval_s: float = 2.0
+    controls_enabled: bool = True
+    comparison_results: Path = BASE_DIR / "docs" / "results" / "optimization_comparison.json"
+
+    @classmethod
+    def from_env(cls, *, default_controls: bool = True) -> "DashboardSettings":
+        return cls(
+            poll_interval_s=_get_float("DASHBOARD_POLL_INTERVAL_S", 2.0, minimum=0.5, maximum=60),
+            controls_enabled=_get_bool("DASHBOARD_CONTROLS_ENABLED", default_controls),
+            comparison_results=_resolve_path(_get_str("DASHBOARD_COMPARISON_RESULTS",
+                                                      "docs/results/optimization_comparison.json")),
+        )
+
+
 # --------------------------------------------------------------------------- #
 # Environment-specific configuration classes
 # --------------------------------------------------------------------------- #
@@ -639,6 +662,7 @@ class BaseConfig:
         self.EXTERNAL_DATA = ExternalDataSettings.from_env()
         self.OPTIMIZATION = OptimizationSettings.from_env()
         self.AGENT = AgentSettings.from_env()
+        self.DASHBOARD = DashboardSettings.from_env(default_controls=self.ENV_NAME != "production")
         self.LOGGING = LoggingSettings.from_env(
             default_level=self.DEFAULT_LOG_LEVEL,
             default_file_enabled=self.DEFAULT_LOG_TO_FILE,

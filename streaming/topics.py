@@ -36,6 +36,7 @@ SECURITY_ALERTS = "security_alerts"
 OPTIMIZATION_COMMANDS = "optimization_commands"
 AGENT_ACTIONS = "agent_actions"
 ENERGY_PREDICTIONS = "energy_predictions"
+SIMULATION_CONTROL = "simulation_control"
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,8 @@ TOPICS: dict[str, TopicSpec] = {spec.name: spec for spec in (
               description="Agent proposals, safety decisions and executed actions (audit trail)"),
     TopicSpec(ENERGY_PREDICTIONS, partitions=5, retention_days=7, key="zone_id",
               description="ML predictions of next-interval energy per zone"),
+    TopicSpec(SIMULATION_CONTROL, partitions=1, retention_days=1, key="building_id",
+              description="Dashboard commands for the simulation manager (start/stop/attack)"),
 )}
 
 

@@ -25,7 +25,8 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
 # Integration tests use the *testing* database (POSTGRES_DB + "_test"), never
 # the development database. They are skipped when PostgreSQL is unreachable.
 DATA_TABLES = ("sensor_readings", "energy_records", "weather_records", "carbon_intensity_records",
-               "security_alerts", "optimization_actions", "invalid_events", "energy_predictions", "agent_decisions")
+               "security_alerts", "optimization_actions", "invalid_events", "energy_predictions", "agent_decisions",
+               "simulated_attacks", "simulation_status")
 
 
 def _test_database_settings():

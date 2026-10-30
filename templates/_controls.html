@@ -1,0 +1,39 @@
+{# Simulation controls: start/stop and simulated attacks (research/testing). #}
+<div class="card h-100">
+  <div class="card-header"><i class="bi bi-sliders"></i> Simulation control</div>
+  <div class="card-body">
+    <p class="small text-muted mb-2" id="sim-detail">—</p>
+    {% if controls_enabled %}
+    <div class="d-flex gap-2 mb-3">
+      <button class="btn btn-success btn-sm" id="btn-start"><i class="bi bi-play-fill"></i> Start</button>
+      <button class="btn btn-outline-secondary btn-sm" id="btn-stop"><i class="bi bi-pause-fill"></i> Stop</button>
+    </div>
+    <form id="attack-form" class="row g-2" novalidate>
+      <div class="col-12 col-sm-6">
+        <label class="form-label small mb-0" for="attack-type">Simulated attack</label>
+        <select class="form-select form-select-sm" id="attack-type" name="attack_type">
+          {% for type in attack_parameters %}<option value="{{ type }}">{{ type | replace('_', ' ') }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-sm-3">
+        <label class="form-label small mb-0" for="attack-zone">Zone</label>
+        <select class="form-select form-select-sm" id="attack-zone" name="zone_id">
+          {% for id, name, type in zones %}<option value="{{ id }}">{{ id }} · {{ name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-sm-3">
+        <label class="form-label small mb-0" for="attack-duration">Minutes (sim.)</label>
+        <input class="form-control form-control-sm" id="attack-duration" name="duration_min" type="number"
+               min="5" max="{{ max_attack_minutes }}" value="60">
+      </div>
+      <div class="col-12 row g-2 m-0 p-0" id="attack-params"></div>
+      <div class="col-12">
+        <button class="btn btn-danger btn-sm" type="submit"><i class="bi bi-bug"></i> Trigger attack</button>
+        <span class="form-text ms-2">Manipulates the published readings of one zone, starting at the next reading.</span>
+      </div>
+    </form>
+    {% else %}
+    <p class="text-muted mb-0">Controls are disabled (<code>DASHBOARD_CONTROLS_ENABLED=false</code>).</p>
+    {% endif %}
+  </div>
+</div>

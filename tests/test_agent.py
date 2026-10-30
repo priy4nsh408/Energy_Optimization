@@ -375,6 +375,14 @@ def test_offline_policy_playbook():
     actions = policy.next_turn("", history, [])
     assert [(c.name, c.input.get("sensor") or c.input.get("action")) for c in actions.tool_calls] == [
         ("isolate_sensor", "temperature"), ("isolate_sensor", "occupancy"), ("adjust_hvac", "clear_overrides")]
+    # cold start: the same evidence with only 10 h of history is not trusted -> assessment, no actions
+    results["run_anomaly_detection"]["history_hours"] = 10.0
+    cold = [first, turn.assistant_message, {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": c.id, "content": json.dumps(results.get(c.name, {}))}
+        for c in turn.tool_calls]}]
+    final = policy.next_turn("", cold, [])
+    assert [c.name for c in final.tool_calls] == ["submit_assessment"]
+    assert "10.0 h of history" in final.tool_calls[0].input["diagnosis"]
 
 
 # --------------------------------------------------------------------------- Anthropic provider (mocked client)

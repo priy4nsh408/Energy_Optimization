@@ -51,7 +51,7 @@ def count(db, table, where="TRUE"):
 
 def test_schema_is_idempotent_and_versioned(db):
     db.apply_schema()
-    assert db.schema_version() == SCHEMA_VERSION == 3
+    assert db.schema_version() == SCHEMA_VERSION == 4
     db.require_schema()
     with db.transaction() as conn:
         assert set(fetch_zones(conn)) == {"Z1", "Z2", "Z3", "Z4", "Z5"}
@@ -150,13 +150,17 @@ def test_action_lifecycle_with_out_of_order_messages(db):
     with db.transaction() as conn:
         assert upsert_optimization_action(conn, action) == "inserted"
         executed = replace(action, status="executed", updated_at=T0 + timedelta(minutes=2),
-                           safety_reason="within comfort limits")
+                           safety_reason="within comfort limits",
+                           parameters={"setpoint_c": 21.0, "result": "applied in simulator"})
         assert upsert_optimization_action(conn, executed) == "updated"
-        late = replace(action, status="approved", updated_at=T0 + timedelta(minutes=1))
+        late = replace(action, status="approved", updated_at=T0 + timedelta(minutes=1),
+                       parameters={"setpoint_c": 21.0, "result": "dispatched"})
         assert upsert_optimization_action(conn, late) == "unchanged"
-        row = conn.execute("SELECT status, reason, safety_reason, updated_at "
+        row = conn.execute("SELECT status, reason, safety_reason, updated_at, parameters "
                            "FROM optimization_actions").fetchone()
-    assert row == ("executed", "pre-cooling", "within comfort limits", T0 + timedelta(minutes=2))
+    # the execution result is kept; the late, older message changes nothing
+    assert row == ("executed", "pre-cooling", "within comfort limits", T0 + timedelta(minutes=2),
+                   {"setpoint_c": 21.0, "result": "applied in simulator"})
 
 
 def test_invalid_events_are_idempotent_per_offset(db):

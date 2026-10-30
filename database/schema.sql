@@ -284,3 +284,43 @@ CREATE INDEX IF NOT EXISTS ix_agent_decisions_time ON agent_decisions (started_a
 CREATE INDEX IF NOT EXISTS ix_agent_decisions_alert ON agent_decisions (alert_id);
 
 INSERT INTO schema_version (version) VALUES (3) ON CONFLICT DO NOTHING;
+
+-- ==========================================================================
+-- Version 4: simulation control from the dashboard (workers.simulation_manager)
+-- ==========================================================================
+-- Current state of each running simulation manager (one row per building).
+CREATE TABLE IF NOT EXISTS simulation_status (
+    building_id         TEXT PRIMARY KEY,
+    state               TEXT NOT NULL CHECK (state IN ('running', 'paused', 'stopped')),
+    sim_time            TIMESTAMPTZ,
+    ticks               BIGINT NOT NULL DEFAULT 0,
+    interval_seconds    DOUBLE PRECISION NOT NULL,
+    speed_factor        DOUBLE PRECISION NOT NULL,
+    seed                BIGINT,
+    apply_commands      BOOLEAN NOT NULL DEFAULT FALSE,
+    commands_applied    INTEGER NOT NULL DEFAULT 0,
+    message             TEXT,
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Simulated attacks (research/testing) and how many readings each one manipulated.
+CREATE TABLE IF NOT EXISTS simulated_attacks (
+    attack_id               UUID PRIMARY KEY,
+    building_id             TEXT NOT NULL,
+    attack_type             TEXT NOT NULL,
+    zone_id                 TEXT NOT NULL,
+    starts_at               TIMESTAMPTZ NOT NULL,       -- simulated time
+    ends_at                 TIMESTAMPTZ NOT NULL,
+    params                  JSONB NOT NULL DEFAULT '{}'::jsonb,
+    requested_at            TIMESTAMPTZ NOT NULL,       -- wall clock
+    source                  TEXT NOT NULL,              -- dashboard | cli
+    readings_manipulated    INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ix_simulated_attacks_time ON simulated_attacks (starts_at DESC);
+-- The dashboard anchors its windows on the most recently *stored* data (the current run).
+CREATE INDEX IF NOT EXISTS ix_sensor_readings_ingested ON sensor_readings (ingested_at DESC);
+CREATE INDEX IF NOT EXISTS ix_energy_records_processed ON energy_records (processed_at DESC);
+CREATE INDEX IF NOT EXISTS ix_security_alerts_updated ON security_alerts (updated_at DESC);
+CREATE INDEX IF NOT EXISTS ix_energy_predictions_ingested ON energy_predictions (ingested_at DESC);
+
+INSERT INTO schema_version (version) VALUES (4) ON CONFLICT DO NOTHING;

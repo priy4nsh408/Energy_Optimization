@@ -311,3 +311,56 @@ def validate_prediction_message(message: Any) -> EnergyPredictionRecord:
         c.errors.append("predicted_for: must be after event_time")
     c.raise_if_invalid()
     return EnergyPredictionRecord(**record)
+
+
+# --------------------------------------------------------------------------- simulation control
+CONTROL_COMMANDS = {"start", "stop", "attack"}
+ATTACK_TYPES = {"temperature_spoofing", "occupancy_manipulation", "replay", "abnormal_power",
+                "gradual_manipulation"}
+# Allowed parameters per attack type: name -> (low, high) for numbers, or a set of choices.
+ATTACK_PARAMETERS: dict[str, dict[str, Any]] = {
+    "temperature_spoofing": {"offset_c": (-10.0, 10.0)},
+    "gradual_manipulation": {"rate_c_per_h": (0.05, 3.0), "max_offset_c": (0.5, 10.0)},
+    "occupancy_manipulation": {"mode": {"hide", "inflate"}, "count": (1, 200)},
+    "abnormal_power": {"factor": (0.1, 10.0)},
+    "replay": {"lag": (1, 576), "mode": {"fields", "verbatim"}},
+}
+MAX_ATTACK_MINUTES = 24 * 60
+
+
+def validate_control_message(message: Any) -> dict[str, Any]:
+    """Contract for ``simulation_control`` (dashboard -> workers.simulation_manager).
+
+    ``{"command_id", "command": start|stop|attack, "building_id", "requested_at",
+    "attack": {"attack_type", "zone_id", "duration_min", "params"}}`` (attack only).
+    Returns a normalised copy.
+    """
+    c = _Checker(message)
+    result = {"command_id": c.uuid("command_id"), "command": c.text("command", choices=CONTROL_COMMANDS),
+              "building_id": c.text("building_id", max_length=64), "requested_at": c.timestamp("requested_at")}
+    if result["command"] == "attack":
+        attack = c.mapping("attack")
+        a = _Checker(attack)
+        attack_type = a.text("attack_type", choices=ATTACK_TYPES)
+        result["attack"] = {"attack_type": attack_type, "zone_id": a.text("zone_id", pattern=ZONE_ID_PATTERN),
+                            "duration_min": a.number("duration_min", 5, MAX_ATTACK_MINUTES)}
+        params = a.mapping("params") if "params" in attack else {}
+        allowed = ATTACK_PARAMETERS.get(attack_type or "", {})
+        clean: dict[str, Any] = {}
+        for name, value in params.items():
+            rule = allowed.get(name)
+            if rule is None:
+                a.errors.append(f"params.{name}: not a parameter of {attack_type}")
+            elif isinstance(rule, set):
+                if value not in rule:
+                    a.errors.append(f"params.{name}: must be one of {sorted(rule)}")
+                else:
+                    clean[name] = value
+            elif isinstance(value, bool) or not isinstance(value, (int, float)) or not rule[0] <= value <= rule[1]:
+                a.errors.append(f"params.{name}: must be a number in [{rule[0]}, {rule[1]}]")
+            else:
+                clean[name] = value
+        result["attack"]["params"] = clean
+        c.errors.extend(f"attack.{e}" for e in a.errors)
+    c.raise_if_invalid()
+    return result
