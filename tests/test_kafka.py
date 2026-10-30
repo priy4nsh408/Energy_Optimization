@@ -13,7 +13,12 @@ from confluent_kafka import KafkaError, KafkaException
 
 from config import ConfigurationError, KafkaSettings
 from streaming import topics
-from streaming.consumer import ConsumedMessage, JsonConsumer, KafkaConsumerFatalError
+from streaming.consumer import (
+    ConsumedMessage,
+    JsonConsumer,
+    KafkaConsumerFatalError,
+    TransientProcessingError,
+)
 from streaming.kafka_config import KafkaUnavailableError, make_error_callback, wait_for_broker
 from streaming.producer import JsonProducer, ProducerError
 from streaming.serialization import (
@@ -81,6 +86,7 @@ class FakeConsumer:
         self.config = config
         self.messages = list(messages)
         self.commits = []
+        self.stored = []
         self.subscribed = None
         self.closed = False
 
@@ -90,10 +96,13 @@ class FakeConsumer:
     def poll(self, timeout):
         return self.messages.pop(0) if self.messages else None
 
+    def store_offsets(self, message):
+        self.stored.append(message.offset())
+
     def commit(self, message=None, asynchronous=True):
-        if message is None and not self.commits:
+        if not self.stored:
             raise KafkaException(KafkaError(KafkaError._NO_OFFSET))
-        self.commits.append((message.offset() if message else "sync", asynchronous))
+        self.commits.append(("sync", asynchronous))
 
     def close(self):
         self.closed = True
@@ -263,7 +272,7 @@ def test_consumer_config_and_subscription(settings):
     consumer, fake = make_consumer(settings, [])
     consumer.run(lambda m: None, max_messages=0)
     assert fake.subscribed == ["t.building_sensor_data"]
-    assert fake.config["group.id"] == "sb.unit" and fake.config["enable.auto.commit"] is False
+    assert fake.config["group.id"] == "sb.unit" and fake.config["enable.auto.offset.store"] is False
 
 
 def test_consumer_decodes_and_commits_messages(settings):
@@ -276,7 +285,7 @@ def test_consumer_decodes_and_commits_messages(settings):
     first = received[0]
     assert first.topic == "building_sensor_data" and first.key == "Z1"
     assert first.headers == {"content-type": "application/json"} and first.timestamp_ms
-    assert [offset for offset, _ in fake.commits] == [0, 1, 2]
+    assert fake.stored == [0, 1, 2]
 
 
 def test_consumer_skips_poison_messages(settings):
@@ -285,7 +294,7 @@ def test_consumer_skips_poison_messages(settings):
     received = []
     stats = consumer.run(received.append, max_messages=2)
     assert stats.invalid == 1 and stats.processed == 1 and len(received) == 1
-    assert [offset for offset, _ in fake.commits] == [0, 1]  # poison message not re-read
+    assert fake.stored == [0, 1]  # poison message not re-read
 
 
 def test_consumer_retries_handler_then_succeeds(settings):
@@ -312,7 +321,36 @@ def test_consumer_skips_message_after_handler_retries(settings):
 
     stats = consumer.run(broken, max_messages=1)
     assert len(calls) == 3 and stats.handler_failures == 1 and stats.processed == 0
-    assert fake.commits[-1][0] == 7
+    assert fake.stored == [7]
+
+
+def test_consumer_retries_transient_errors_without_skipping(settings):
+    consumer, fake = make_consumer(settings, [FakeMessage(event_bytes(), offset=4)],
+                                   max_handler_retries=1)
+    calls = []
+
+    def database_down_then_up(message):
+        calls.append(1)
+        if len(calls) < 6:  # more failures than max_handler_retries
+            raise TransientProcessingError("database unavailable")
+
+    stats = consumer.run(database_down_then_up, max_messages=1)
+    assert len(calls) == 6 and stats.processed == 1 and stats.handler_failures == 0
+    assert stats.transient_retries == 5 and fake.stored == [4]
+
+
+def test_consumer_does_not_store_offset_when_stopped_during_failure(settings):
+    consumer, fake = make_consumer(settings, [FakeMessage(event_bytes(), offset=9),
+                                              FakeMessage(event_bytes(), offset=10)])
+    stop = threading.Event()
+
+    def failing(message):
+        stop.set()  # shutdown requested while the database is down
+        raise TransientProcessingError("database unavailable")
+
+    stats = consumer.run(failing, stop_event=stop)
+    assert stats.processed == 0 and fake.stored == []  # message 9 will be redelivered
+    assert len(fake.messages) == 1                      # message 10 was never polled
 
 
 def test_consumer_survives_transient_errors(settings, caplog):

@@ -229,8 +229,11 @@ class KafkaSettings:
             **self._common_config(),
             "group.id": f"{self.consumer_group_prefix}.{group_name}",
             "auto.offset.reset": self.auto_offset_reset,
-            # Offsets are committed by the consumer after successful processing.
-            "enable.auto.commit": False,
+            # At-least-once: the consumer stores an offset only after a message
+            # was processed; only stored offsets are (auto-)committed.
+            "enable.auto.commit": True,
+            "enable.auto.offset.store": False,
+            "auto.commit.interval.ms": 1000,
             "session.timeout.ms": max(self.request_timeout_ms, 6000),
         }
 

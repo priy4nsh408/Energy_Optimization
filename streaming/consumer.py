@@ -15,10 +15,14 @@ Error handling:
     * Invalid JSON ("poison" messages): logged, counted and skipped.
     * Handler exceptions: retried with back-off, then logged and skipped, so
       one bad message cannot block a partition.
+    * :class:`TransientProcessingError` from a handler (e.g. database down):
+      retried with back-off *indefinitely* and never skipped. On shutdown the
+      message stays uncommitted and is processed again on the next start.
     * Fatal client errors: raised as :class:`KafkaConsumerFatalError`.
 
-Offsets are committed only after a message has been handled (at-least-once
-delivery), so handlers should be idempotent (e.g. use ``event_id``).
+Offsets are stored only after a message has been handled and committed
+automatically from that store (at-least-once delivery), so handlers must be
+idempotent (e.g. use ``event_id``).
 """
 
 from __future__ import annotations
@@ -43,6 +47,14 @@ class KafkaConsumerFatalError(RuntimeError):
     """The consumer hit an unrecoverable error."""
 
 
+class TransientProcessingError(RuntimeError):
+    """Raised by a handler when processing should be retried later, never skipped.
+
+    Use it for temporary infrastructure failures (database unavailable, ...),
+    not for bad data.
+    """
+
+
 @dataclass(frozen=True)
 class ConsumedMessage:
     """A decoded Kafka message passed to handlers."""
@@ -65,11 +77,14 @@ class ConsumerStats:
     processed: int = 0
     invalid: int = 0            # undecodable payloads skipped
     handler_failures: int = 0   # messages skipped after handler retries
+    transient_retries: int = 0  # retries caused by TransientProcessingError
     errors: int = 0             # client/broker errors reported by poll()
 
 
 class JsonConsumer:
     """Polls JSON messages from one or more topics and dispatches them to a handler."""
+
+    MAX_TRANSIENT_BACKOFF_S = 30.0
 
     def __init__(self, settings: KafkaSettings, group_name: str, topics: Sequence[str], *,
                  max_handler_retries: int = 3, retry_backoff_s: float = 0.5,
@@ -198,14 +213,33 @@ class JsonConsumer:
             headers={k: v.decode("utf-8", errors="replace") if v is not None else ""
                      for k, v in (message.headers() or [])},
         )
-        attempts = self.max_handler_retries + 1
-        for attempt in range(1, attempts + 1):
+        attempts, transient_attempt = self.max_handler_retries + 1, 0
+        attempt = 0
+        while True:
             try:
                 handler(consumed)
                 self.stats.processed += 1
                 break
+            except TransientProcessingError as exc:
+                if stop_event.is_set():
+                    logger.warning("Stopping during transient failure; message will be "
+                                   "processed again after restart", extra=location)
+                    return  # offset not stored
+                transient_attempt += 1
+                self.stats.transient_retries += 1
+                delay = min(self.MAX_TRANSIENT_BACKOFF_S,
+                            self.retry_backoff_s * 2 ** min(transient_attempt - 1, 10))
+                logger.warning("Transient processing failure; retrying", extra={
+                    **location, "attempt": transient_attempt, "retry_in_s": round(delay, 2),
+                    "error": str(exc)})
+                stop_event.wait(delay)
             except Exception as exc:  # noqa: BLE001 - handler errors must not kill the consumer
-                if attempt == attempts or stop_event.is_set():
+                attempt += 1
+                if stop_event.is_set():
+                    logger.warning("Stopping during handler retries; message will be "
+                                   "processed again after restart", extra=location)
+                    return  # offset not stored
+                if attempt >= attempts:
                     self.stats.handler_failures += 1
                     logger.error("Handler failed; skipping message",
                                  extra={**location, "attempts": attempt, "error": repr(exc)},
@@ -218,11 +252,13 @@ class JsonConsumer:
 
     # -- offsets ------------------------------------------------------------------------
     def _commit(self, message: Message) -> None:
+        """Mark ``message`` as processed; librdkafka commits stored offsets periodically."""
         try:
-            self._consumer.commit(message=message, asynchronous=True)
+            self._consumer.store_offsets(message=message)
         except KafkaException as exc:
-            logger.warning("Offset commit failed (will be retried with later offsets)",
-                           extra={"group_id": self.group_id, "error": str(exc)})
+            # e.g. partition revoked meanwhile; the message will be redelivered.
+            logger.warning("Could not store offset", extra={
+                "group_id": self.group_id, "error": str(exc)})
 
     def _commit_sync(self) -> None:
         try:

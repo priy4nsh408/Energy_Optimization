@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -123,7 +124,7 @@ def test_kafka_client_configs(clean_env):
 
     consumer = cfg.KAFKA.consumer_config("db_writer")
     assert consumer["group.id"] == "smart-building.db_writer"
-    assert consumer["enable.auto.commit"] is False
+    assert consumer["enable.auto.offset.store"] is False
     with pytest.raises(ConfigurationError):
         cfg.KAFKA.consumer_config("")
     with pytest.raises(ConfigurationError):
@@ -158,6 +159,9 @@ def test_relative_log_dir_resolves_to_project(clean_env):
 
 
 def test_dotenv_does_not_override_real_env(clean_env, tmp_path: Path):
+    # load_dotenv writes into os.environ directly; use a throwaway copy so the
+    # loaded values cannot leak into later tests.
+    clean_env.setattr(os, "environ", os.environ.copy())
     env_file = tmp_path / ".env"
     env_file.write_text("FLASK_PORT=7000\nPOSTGRES_DB=from_dotenv\n", encoding="utf-8")
     clean_env.setenv("FLASK_PORT", "9000")

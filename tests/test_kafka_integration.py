@@ -27,23 +27,6 @@ from tests.test_simulator import make_settings
 pytestmark = pytest.mark.kafka
 
 
-@pytest.fixture(scope="session")
-def kafka():
-    base = get_config("testing", load_dotenv_file=False).KAFKA
-    settings = dataclasses.replace(base, topic_prefix=f"it_{uuid.uuid4().hex[:8]}.",
-                                   consumer_group_prefix=f"it_{uuid.uuid4().hex[:8]}")
-    try:
-        wait_for_broker(settings, timeout_s=3)
-    except KafkaUnavailableError:
-        pytest.skip("Kafka broker not reachable (start docker/docker-compose.yml)")
-    admin = create_admin_client(settings)
-    ensure_topics(admin, settings)
-    yield settings
-    futures = admin.delete_topics([topic_name(settings, name) for name in TOPICS])
-    for future in futures.values():
-        future.result()
-
-
 def publish_simulated_readings(settings, ticks: int, seed: int) -> list[dict]:
     simulator = BuildingSimulator(make_settings(random_seed=seed))
     sent = []

@@ -35,9 +35,9 @@ Design rules:
 | `simulator/` | Five-zone building physics, occupancy, outdoor climate and sensor simulation (attack simulation added later) |
 | `docs/sample_output/` | Sample simulator output (JSON Lines) |
 | `streaming/` | Kafka topic registry, JSON producer/consumer, connection helpers (named `streaming` so it does not shadow Kafka client libraries) |
-| `workers/` | Long-running services, one process each (sensor publisher, topic monitor, later DB/ML/security workers) |
-| `processors/` | Stream processing, validation and feature engineering |
-| `database/` | PostgreSQL schema and data access |
+| `workers/` | Long-running services, one process each (sensor publisher, persistence workers, topic monitor) |
+| `processors/` | Message validation, feature engineering, energy/carbon calculations (no I/O) |
+| `database/` | PostgreSQL schema (`schema.sql`), connection pool, records, repositories, admin CLI |
 | `data_sources/` | Weather and carbon-intensity APIs |
 | `ml/` | Energy prediction model (training, inference, evaluation) |
 | `optimization/` | HVAC and lighting optimisation under comfort constraints |
@@ -209,11 +209,14 @@ auto-creation is disabled.
   undelivered messages for `KAFKA_MESSAGE_TIMEOUT_MS` (default 2 min), and consumers resume from
   their committed offsets. Services wait for the broker at start-up.
 - **Consumer:**
-  - Offsets are committed manually, after processing, which gives at-least-once delivery.
+  - An offset is stored only after its message has been processed, and only stored offsets are
+    committed. This gives at-least-once delivery.
     **Handlers must be idempotent** (use `event_id`), because messages can be redelivered after a
     rebalance or broker restart.
   - Invalid JSON is logged and skipped.
-  - A failing handler is retried with back-off, then the message is skipped.
+  - A failing handler is retried with back-off, then the message is skipped. Handlers raise
+    `TransientProcessingError` for temporary infrastructure failures (e.g. database down); those
+    messages are retried indefinitely and never skipped.
   - Fatal client errors stop the service.
 
 ### Run it
@@ -246,13 +249,101 @@ docker restart smart-building-kafka
 
 The services log the disconnection, reconnect, and continue without losing messages.
 
+## PostgreSQL and data processing
+
+### Setup
+
+PostgreSQL 16 runs in Docker (see `docker/docker-compose.yml`). Connection settings are the
+`POSTGRES_*` variables in `.env`. The compose file creates the database and user from the same
+variables; it defaults to password `change_me`.
+
+```powershell
+docker compose -f docker/docker-compose.yml --env-file .env up -d
+python -m database init      # creates the database if missing, tables, views, zone registry
+python -m database status    # schema version and row counts per table
+```
+
+`init` is idempotent, so it is safe to re-run. The full SQL is in `database/schema.sql`.
+
+To inspect the data directly:
+
+```powershell
+docker exec -it smart-building-postgres psql -U smart_building -d smart_building
+```
+
+### Schema
+
+| Table | Key | Written by | Content |
+|---|---|---|---|
+| `zones` | `zone_id` | `database init` | Zone registry (area, capacity, setpoint) |
+| `sensor_readings` | `event_id` | `sensor_persistence` | Validated raw sensor events, plus Kafka partition/offset |
+| `energy_records` | `event_id` | `energy_processor` | Energy by end use, CO₂e, engineered features |
+| `weather_records` | `event_id`, unique (building, source, forecast, time) | `record_persistence` | Weather observations and forecasts |
+| `carbon_intensity_records` | `event_id`, unique (region, source, forecast, time) | `record_persistence` | Grid carbon intensity |
+| `security_alerts` | `alert_id` | `record_persistence` | Alerts; status open → acknowledged → resolved |
+| `optimization_actions` | `action_id` | `record_persistence` | Optimizer/agent action history; status proposed → approved/rejected → executed/failed |
+| `invalid_events` | (worker, topic, partition, offset) | all workers | Rejected messages with their errors |
+| `hourly_zone_energy` (view) | (zone, hour) | – | kWh by end use, average/peak power, CO₂e, temperature, occupancy |
+
+All timestamps are `TIMESTAMPTZ`. `event_time` is the simulated measurement time, `emitted_at`
+is when the event was produced, and `ingested_at`/`processed_at` are when it was stored.
+
+### Workers
+
+Run each worker in its own terminal. Each one is an independent consumer group.
+
+```powershell
+python -m workers.sensor_persistence    # building_sensor_data -> sensor_readings
+python -m workers.energy_processor      # building_sensor_data (+ carbon_intensity) -> energy_records
+python -m workers.record_persistence    # weather, carbon, alerts, commands, agent actions -> tables
+```
+
+**Validation:** every message is checked against its contract: required fields, types, physical
+ranges, UUIDs, timezone-aware timestamps, and power components that add up to the total.
+Invalid messages go to `invalid_events` with every error listed.
+
+**Feature engineering** (stored in `energy_records`):
+
+- calendar: hour, weekday, weekend flag, cyclic hour
+- thermal: indoor−outdoor temperature, setpoint deviation, temperature rate (°C/h)
+- usage: occupancy ratio, power density (W/m²), HVAC share
+- temporal: change in power since the previous reading, and the rolling mean/std/max over the last
+  12 readings of the zone
+
+The feature history resets after a long gap or when time goes backwards, and is restored from the
+database when the worker restarts.
+
+**Carbon:** CO₂e = kWh × the latest *observed* grid intensity from the `carbon_intensity` topic.
+Until such data exists, the carbon columns are NULL; no default value is assumed.
+
+**Reliability:**
+
+- *Duplicates:* inserts use `ON CONFLICT` on each record's id, so Kafka redeliveries are stored once.
+- *Status updates:* alert and action updates only move the status forward, so a late or duplicated
+  message cannot overwrite a newer state.
+- *Database outages:* the worker retries with back-off and never skips a message. Offsets are stored
+  only after a successful write, so after a crash the message is processed again.
+- *Data the database rejects* (for example a constraint violation) is logged to `invalid_events`
+  rather than retried forever.
+
+### Message contracts for the other topics
+
+Later modules must publish messages in this form. Fields marked ? are optional.
+
+| Topic | Fields |
+|---|---|
+| `weather_data` | `event_id` (UUID), `building_id`, `observed_at` (ISO, with offset), `source`, `is_forecast`?, `temperature_c`, `humidity_pct`?, `wind_speed_ms`?, `solar_irradiance_w_m2`?, `cloud_cover_pct`? |
+| `carbon_intensity` | `event_id`, `region`, `observed_at`, `source`, `is_forecast`?, `intensity_g_per_kwh` |
+| `security_alerts` | `alert_id`, `zone_id`?, `source_event_id`?, `detected_at`, `alert_type` (anomaly/attack/drift/validation), `severity` (low/medium/high/critical), `detector`, `score`?, `description`, `details`?, `status`?, `resolved_at`? |
+| `optimization_commands`, `agent_actions` | `action_id`, `zone_id`, `created_at`, `updated_at`?, `source` (optimizer/agent/operator/baseline), `action_type` (set_setpoint/set_hvac_mode/set_lighting/clear_overrides), `parameters` (object), `status`, `reason`?, `safety_reason`?, `related_alert_id`? |
+
 ## Verify the environment
 
 ```powershell
 python -m scripts.check_environment                   # Python, packages, configuration
 python -m scripts.check_environment --check-services  # also probe Kafka and PostgreSQL
-python -m pytest                                      # unit + Kafka integration tests
-python -m pytest -m "not kafka"                       # skip tests that need a broker
+python -m pytest                                      # unit + Kafka/PostgreSQL integration tests
+python -m pytest -m "not kafka and not postgres"      # unit tests only (no Docker needed)
 python app.py                                         # then open http://127.0.0.1:5000/health
 ```
 
@@ -263,8 +354,8 @@ python app.py                                         # then open http://127.0.0
 | 1 | Project setup and configuration | ✅ Done |
 | 2 | Building simulator | ✅ Done |
 | 3 | Kafka infrastructure (Docker, producers/consumers) | ✅ Done |
-| 4 | PostgreSQL persistence | ⏳ Next |
-| 5 | Weather and carbon-intensity data | Planned |
+| 4 | Data processing and PostgreSQL persistence | ✅ Done |
+| 5 | Weather and carbon-intensity data | ⏳ Next |
 | 6 | Energy prediction (XGBoost) | Planned |
 | 7 | HVAC/lighting optimisation (SciPy) | Planned |
 | 8 | Cyberattack simulation | Planned |
