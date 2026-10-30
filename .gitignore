@@ -30,6 +30,7 @@ logs/
 *.pkl
 *.joblib
 ml/artifacts/
+security/artifacts/
 
 # Generated data
 data/raw/

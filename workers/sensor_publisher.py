@@ -12,13 +12,16 @@ in order.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import threading
+from pathlib import Path
 
 from confluent_kafka import KafkaException
 
 from config import ConfigurationError, get_config
 from simulator.__main__ import add_simulation_arguments, build_settings
+from simulator.attack_simulator import AttackInjector, AttackScenario
 from simulator.engine import BuildingSimulator
 from streaming.kafka_config import KafkaUnavailableError, create_admin_client, wait_for_broker
 from streaming.producer import JsonProducer
@@ -35,6 +38,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="seconds to wait for Kafka at start-up (default 60)")
     parser.add_argument("--no-create-topics", action="store_true",
                         help="do not create missing topics at start-up")
+    parser.add_argument("--attack", action="append", default=[], metavar="SPEC",
+                        help="inject a simulated attack (research/testing): "
+                             "TYPE:ZONE:START_MIN:DURATION_MIN[:key=value,...]; repeatable")
+    parser.add_argument("--labels", type=Path,
+                        help="write ground-truth attack labels (JSON Lines) to this file")
     return parser.parse_args(argv)
 
 
@@ -61,8 +69,21 @@ def main(argv: list[str] | None = None, stop_event: threading.Event | None = Non
 
     producer = JsonProducer(config.KAFKA, name="sensor_publisher")
     simulator = BuildingSimulator(settings)
+    injector = None
+    if args.attack:
+        try:
+            scenarios = [AttackScenario.parse(spec, simulator.sim_time) for spec in args.attack]
+        except ValueError as exc:
+            logger.error("Invalid attack specification", extra={"error": str(exc)})
+            producer.close()
+            return 2
+        injector = AttackInjector(scenarios)
+        logger.warning("ATTACK SIMULATION ENABLED: published readings will be manipulated",
+                       extra={"attacks": args.attack})
 
     def publish(event: dict) -> None:
+        if injector is not None:
+            event = injector.apply(event)
         producer.send(BUILDING_SENSOR_DATA, event, key=event["zone_id"],
                       headers={"event_type": event["event_type"]})
 
@@ -72,6 +93,11 @@ def main(argv: list[str] | None = None, stop_event: threading.Event | None = Non
         logger.info("Interrupted")
     finally:
         producer.close(timeout_s=30)
+        if injector is not None and args.labels:
+            args.labels.parent.mkdir(parents=True, exist_ok=True)
+            with args.labels.open("w", encoding="utf-8") as handle:
+                for label in injector.labels:
+                    handle.write(json.dumps({**vars(label), "timestamp": label.timestamp.isoformat()}) + "\n")
     stats = producer.stats
     logger.info("Sensor publisher finished", extra={
         "sent": stats.sent, "delivered": stats.delivered, "failed": stats.failed,

@@ -17,7 +17,7 @@ Open-Meteo, Electricity Maps ──► [external_data_publisher] ──► weath
                                                                          └─► [record_persistence] ──► PostgreSQL
 building_sensor_data ──► [prediction_service] ──► energy_predictions ──► [record_persistence]
 sensor data + energy_predictions + carbon ──► [optimization_service] ──► optimization_commands ──► [record_persistence]
-planned: security_worker ──► security_alerts ──► agent (LangGraph)
+building_sensor_data ──► [security_service] ──► security_alerts ──► [record_persistence] ──► security_alerts ──► agent (LangGraph)
          ──► agent_actions ──► safety layer ──► optimization_commands ──► simulator
          Flask + Socket.IO dashboard ◄── dashboard bridge (Kafka → Socket.IO) + PostgreSQL history
 ```
@@ -36,7 +36,7 @@ Design rules:
 | `utils/logging_config.py` | Structured JSON/text logging, one log file per service |
 | `app.py` | Flask application factory (wiring only) |
 | `scripts/check_environment.py` | Verifies Python, packages, configuration and service connectivity |
-| `simulator/` | Five-zone building physics, occupancy, outdoor climate and sensor simulation (attack simulation added later) |
+| `simulator/` | Five-zone building physics, occupancy, outdoor climate, sensor and attack simulation |
 | `docs/sample_output/` | Sample simulator output (JSON Lines) |
 | `streaming/` | Kafka topic registry, JSON producer/consumer, connection helpers (named `streaming` so it does not shadow Kafka client libraries) |
 | `workers/` | Long-running services, one process each (sensor publisher, persistence workers, topic monitor) |
@@ -46,10 +46,10 @@ Design rules:
 | `ml/` | Energy prediction: dataset loading, leakage-safe features, models, training, evaluation, model registry, inference |
 | `docs/results/` | Generated evaluation reports (from real training runs) |
 | `optimization/` | Deterministic SciPy HVAC/lighting optimizer, energy model, lighting rules, constraints/validator |
-| `security/` | Anomaly, attack and drift detection, alert management |
+| `security/` | Rule-based validation, Isolation Forest, KS/PSI drift detection, attack classification, alerts, training |
 | `agent/` | Agentic AI (LangGraph) and safety validation |
 | `routes/`, `templates/`, `static/` | Dashboard |
-| `experiments/` | Closed-loop baseline vs. optimized comparison (attack experiments later) |
+| `experiments/` | Closed-loop baseline vs. optimized comparison; labelled cyberattack evaluation |
 | `docker/` | Kafka and PostgreSQL containers |
 | `tests/` | Unit tests (pytest) |
 
@@ -568,6 +568,103 @@ No decision was rejected by the validator.
 - *Synthetic data:* the carbon intensity is synthetic. The building is simulated, and its
   physics matches the optimizer's engineering parameters, which favours the optimizer.
 
+## Cybersecurity and drift detection
+
+### Attack simulation (`simulator/attack_simulator.py`)
+
+Attacks manipulate the *reported* readings between the sensors and their consumers; the physical
+building is unchanged. Ground-truth labels are stored outside the events, so detectors never see
+them.
+
+| Attack | Effect |
+|---|---|
+| `temperature_spoofing` | abrupt temperature offset (`offset_c`) |
+| `occupancy_manipulation` | people hidden (`mode=hide`) or invented (`mode=inflate`, `count`) |
+| `replay` | values from `lag` readings earlier re-sent with fresh metadata, or the old message verbatim (`mode=verbatim`) |
+| `abnormal_power` | all power readings scaled by `factor`; still internally consistent |
+| `gradual_manipulation` | temperature offset ramping at `rate_c_per_h` |
+
+```powershell
+python -m workers.sensor_publisher --attack temperature_spoofing:Z1:60:30:offset_c=4 --labels data/labels.jsonl
+```
+
+### Detection (`security/`)
+
+Every reading goes through the same `SecurityMonitor`, in the Kafka service and in the evaluation.
+
+1. **Validation:** schema and physical ranges; failures raise a `validation` alert.
+2. **Rule-based checks:** thresholds are calibrated on clean data, never on attacks.
+   - Replay: timestamp or sequence going backwards; two consecutive readings repeating earlier readings exactly.
+   - Physics: temperature, occupancy and power changing faster than ever observed.
+   - Consistency: the temperature contradicts the HVAC state; CO₂ doesn't match the reported
+     occupancy; lighting power doesn't match the dimming level; HVAC power while idle doesn't match
+     fan power; appliance power doesn't match occupancy.
+3. **Isolation Forest:** one model per zone on 18 features (readings, rates of change, residuals,
+   time). The threshold is the 99.9th percentile of scores on a clean validation period.
+4. **Classification:** replay evidence first, then the most frequent rule type. An Isolation Forest
+   anomaly without rule hits is attributed to its most unusual feature group (temperature,
+   occupancy or power), or labelled `unknown_anomaly`.
+5. **Drift (KS test + PSI)** on 6-hour windows, evaluated hourly, against a reference matched to
+   the same hours and day type:
+   - *Security drift*, classified as `gradual_manipulation`, monitors residuals that should stay
+     stationary: the temperature control error while the HVAC is active, and the CO₂-vs-occupancy
+     residual. A window drifts only when KS p < 0.01, PSI ≥ 0.25 and the mean moves by ≥ 0.5
+     reference standard deviations, for 2 consecutive evaluations. Monitors that false-alarm
+     on > 2 % of clean validation windows are disabled; this disabled the CO₂ residual in Z1–Z4.
+   - *Data drift* (`data_drift`, low severity) monitors raw readings. It signals that inputs
+     differ from the training data (season, weather) and that models need retraining. It is
+     **not** treated as an attack.
+
+**Individual anomalies vs. drift.** Point alerts (`alert_type` `attack` or `anomaly`) refer to one
+reading (`source_event_id`, `details.scope = "individual_reading"`). Drift alerts refer to a time
+window (`details.window_start/end`, `scope = "distribution_window"`). Alerts are rate-limited per
+zone and type (15 min; 6 h for data drift).
+
+```powershell
+python -m security.train                         # train on clean data (or --source db)
+python -m workers.security_service               # Kafka: building_sensor_data -> security_alerts
+python -m experiments.cyberattack_experiment --week test2 --report docs/results/security_evaluation.md
+```
+
+### Evaluation (labelled simulated attacks)
+
+The detectors are trained on 28 clean simulated days (January, 40,320 readings). Each evaluation week
+has 10,080 readings with scheduled attacks. Point metrics exclude gradual-manipulation readings
+(those are evaluated as drift) and the first reading after each attack.
+
+| Week | Role | Precision | Recall | F1 | False-positive rate | Security-drift false alarms | Gradual attacks detected |
+|---|---|---|---|---|---|---|---|
+| development (Feb 9, seed 202) | used while building the detectors | 0.831 | 0.983 | 0.901 | 0.24 % | — | 1 of 1 |
+| test 1 (Feb 16, seed 303) | held out, **before** fixes | 0.642 | 0.619 | 0.630 | 0.61 % | 12 / 722 | 2 of 2 |
+| test 2 (Mar 2, seed 404) | held out, **after** fixes | 0.310 | 0.988 | 0.472 | 3.87 % | 48 / 719 | 2 of 2 |
+
+Reports: `docs/results/security_evaluation_test1_before_fixes.md` and
+`docs/results/security_evaluation.md` (test 2, with latency per attack).
+
+**How the detectors evolved.**
+
+- *Test week 1* showed that power scaling (0 % recall) and spoofing within the night-setback range
+  (33 %) were missed.
+- *Fixes:* power-consistency rules, and hour-dependent control-error ranges.
+- *Test week 2* was created only after these fixes, and it was not used for tuning. On it, recall
+  reached 98.8 %: every attack segment was detected, mostly within 0–5 minutes.
+- *Gradual attacks* were detected by drift after 2 h (0.6 °C/h ramp) and 8 h (0.3 °C/h).
+
+**Main limitation.** False positives rose to 3.9 % in March: 313 of 370 come from the
+HVAC-contradiction rule. Its "possible control error per HVAC state" ranges were learned from
+**January** data and do not fit spring weather. The data-drift monitor flagged this mismatch (809 of
+814 windows).
+
+Mitigations, not yet evaluated: train on recent or multi-season data and retrain when data drift
+persists, or derive these bounds from thermostat logic instead of history.
+
+**Other limitations:**
+
+- Attacks are simulated, and the simulator's sensors are "clean", so results on real buildings will
+  differ.
+- An attacker who knows the rules could craft physically consistent manipulations.
+- Drift detection of slow CO₂-sensor manipulation is disabled in four zones (too noisy).
+
 ## Verify the environment
 
 ```powershell
@@ -589,12 +686,11 @@ python app.py                                         # then open http://127.0.0
 | 5 | Weather and carbon-intensity data | ✅ Done |
 | 6 | Energy prediction (XGBoost) | ✅ Done |
 | 7 | HVAC/lighting optimisation (SciPy) | ✅ Done |
-| 8 | Cyberattack simulation | ⏳ Next |
-| 9 | Anomaly and drift detection | Planned |
-| 10 | Safety layer and action execution | Planned |
-| 11 | Agentic AI (LangGraph) | Planned |
-| 12 | Real-time dashboard | Planned |
-| 13 | Experiments and evaluation | Planned |
+| 8 | Cyberattack simulation, anomaly and drift detection | ✅ Done |
+| 9 | Safety layer and action execution | ⏳ Next |
+| 10 | Agentic AI (LangGraph) | Planned |
+| 11 | Real-time dashboard | Planned |
+| 12 | Experiments and evaluation | Planned |
 
 No experimental results are reported yet. Results will be added only after real
 experiment runs.
