@@ -138,13 +138,20 @@ def fetch_recent_energy(conn: psycopg.Connection, limit_per_zone: int) -> list[d
         return list(cur.execute(query, (limit_per_zone,)))
 
 
-def latest_carbon_intensity(conn: psycopg.Connection, at: datetime | None = None) -> float | None:
-    """Most recent observed (non-forecast) carbon intensity at or before ``at``."""
+def latest_carbon_observation(conn: psycopg.Connection,
+                              at: datetime | None = None) -> tuple[float, datetime] | None:
+    """(intensity, observed_at) of the most recent observed (non-forecast) value at or before ``at``."""
     row = conn.execute(
-        "SELECT intensity_g_per_kwh FROM carbon_intensity_records "
+        "SELECT intensity_g_per_kwh, observed_at FROM carbon_intensity_records "
         "WHERE NOT is_forecast AND observed_at <= COALESCE(%s, now()) "
         "ORDER BY observed_at DESC LIMIT 1", (at,)).fetchone()
-    return row[0] if row else None
+    return (row[0], row[1]) if row else None
+
+
+def latest_carbon_intensity(conn: psycopg.Connection, at: datetime | None = None) -> float | None:
+    """Most recent observed (non-forecast) carbon intensity at or before ``at``."""
+    observation = latest_carbon_observation(conn, at)
+    return observation[0] if observation else None
 
 
 def table_counts(conn: psycopg.Connection) -> dict[str, int]:

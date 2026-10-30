@@ -16,5 +16,8 @@ confluent-kafka>=2.6,<3
 psycopg[binary]>=3.2,<4
 psycopg-pool>=3.2,<4
 
+# --- External APIs (weather, carbon intensity) -----------------------------------
+requests>=2.31,<3
+
 # --- Testing -------------------------------------------------------------------
 pytest>=8.0,<9

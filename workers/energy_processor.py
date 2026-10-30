@@ -15,7 +15,7 @@ from database.repositories import (
     fetch_recent_energy,
     fetch_zones,
     insert_record,
-    latest_carbon_intensity,
+    latest_carbon_observation,
 )
 from processors.data_validator import validate_carbon_message, validate_sensor_event
 from processors.energy_processor import EnergyProcessor
@@ -42,12 +42,14 @@ class EnergyProcessorHandler(PersistenceHandler):
         with db.transaction() as conn:
             zones = fetch_zones(conn)
             recent = fetch_recent_energy(conn, DEFAULT_WINDOW)
-            intensity = latest_carbon_intensity(conn)
+            carbon = latest_carbon_observation(conn)
         features = FeatureEngineer(zones)
         loaded = features.warm_start(recent)
+        intensity, observed_at = carbon if carbon else (None, None)
         logger.info("Energy processor state loaded", extra={
-            "zones": len(zones), "history_points": loaded, "carbon_intensity_g_per_kwh": intensity})
-        return cls(db, logger, EnergyProcessor(features, intensity))
+            "zones": len(zones), "history_points": loaded, "carbon_intensity_g_per_kwh": intensity,
+            "carbon_observed_at": observed_at.isoformat() if observed_at else None})
+        return cls(db, logger, EnergyProcessor(features, intensity, observed_at))
 
     def handle(self, message: ConsumedMessage) -> None:
         if message.topic == CARBON_INTENSITY:

@@ -9,6 +9,7 @@ data exists the carbon columns stay NULL (no assumed default value).
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
 from database.models import CarbonIntensityRecord, EnergyRecord, SensorReadingRecord
 from processors.feature_engineering import FeatureEngineer
@@ -20,10 +21,11 @@ class EnergyProcessor:
     """Stateless energy calculations plus a stateful feature engineer."""
 
     def __init__(self, features: FeatureEngineer,
-                 carbon_intensity_g_per_kwh: float | None = None) -> None:
+                 carbon_intensity_g_per_kwh: float | None = None,
+                 carbon_observed_at: datetime | None = None) -> None:
         self.features = features
         self.carbon_intensity_g_per_kwh = carbon_intensity_g_per_kwh
-        self._carbon_observed_at = None
+        self._carbon_observed_at = carbon_observed_at
 
     def update_carbon_intensity(self, record: CarbonIntensityRecord) -> bool:
         """Use the newest observed (non-forecast) intensity. Returns True if it changed."""

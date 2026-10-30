@@ -77,6 +77,21 @@ def test_energy_handler_adds_features_and_carbon(db):
     assert restarted.processor.carbon_intensity_g_per_kwh is None  # no carbon rows stored by this worker
 
 
+def test_energy_handler_restores_carbon_with_its_timestamp(db):
+    from database.models import CarbonIntensityRecord
+    from database.repositories import insert_record
+    from datetime import timedelta
+
+    with db.transaction() as conn:
+        insert_record(conn, CarbonIntensityRecord(uuid.uuid4(), "GB", T0, "test", False, 180.0))
+    handler = EnergyProcessorHandler.create(db, LOGGER)
+    assert handler.processor.carbon_intensity_g_per_kwh == 180.0
+    older = {"event_id": str(uuid.uuid4()), "region": "GB", "source": "test",
+             "observed_at": (T0 - timedelta(hours=3)).isoformat(), "intensity_g_per_kwh": 999.0}
+    handler(message(older, topic="carbon_intensity"))      # e.g. a back-fill arriving later
+    assert handler.processor.carbon_intensity_g_per_kwh == 180.0
+
+
 def test_record_handler_dispatches_by_topic(db):
     handler = RecordPersistenceHandler(db, LOGGER)
     now = T0.isoformat()

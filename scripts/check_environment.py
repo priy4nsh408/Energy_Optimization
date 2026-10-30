@@ -25,6 +25,7 @@ REQUIRED_PACKAGES = {
     "psycopg": "psycopg",
     "psycopg_pool": "psycopg-pool",
     "dotenv": "python-dotenv",
+    "requests": "requests",
 }
 
 

@@ -11,11 +11,13 @@ is executed. A Flask + Socket.IO dashboard shows everything live.
 ## Architecture
 
 ```
-simulator ──► [sensor_publisher] ──► building_sensor_data ─┬─► db_writer ───────────► PostgreSQL
-weather / carbon APIs ──► weather_data, carbon_intensity ──┼─► ml_worker / optimizer
-                                                           ├─► security_worker ──► security_alerts
-agent (LangGraph) ◄── security_alerts ──► agent_actions ──► safety layer ──► optimization_commands ──► simulator
-Flask + Socket.IO dashboard ◄── dashboard bridge (Kafka → Socket.IO) + PostgreSQL history
+simulator ──► [sensor_publisher] ──────────────► building_sensor_data ──┬─► [sensor_persistence] ──► PostgreSQL
+                                                                         ├─► [energy_processor] ────► PostgreSQL
+Open-Meteo, Electricity Maps ──► [external_data_publisher] ──► weather_data, carbon_intensity
+                                                                         └─► [record_persistence] ──► PostgreSQL
+planned: ml_worker, optimizer, security_worker ──► security_alerts ──► agent (LangGraph)
+         ──► agent_actions ──► safety layer ──► optimization_commands ──► simulator
+         Flask + Socket.IO dashboard ◄── dashboard bridge (Kafka → Socket.IO) + PostgreSQL history
 ```
 
 Design rules:
@@ -38,7 +40,7 @@ Design rules:
 | `workers/` | Long-running services, one process each (sensor publisher, persistence workers, topic monitor) |
 | `processors/` | Message validation, feature engineering, energy/carbon calculations (no I/O) |
 | `database/` | PostgreSQL schema (`schema.sql`), connection pool, records, repositories, admin CLI |
-| `data_sources/` | Weather and carbon-intensity APIs |
+| `data_sources/` | Weather (Open-Meteo) and carbon-intensity (Electricity Maps, UK grid) providers, cached HTTP client, mock providers |
 | `ml/` | Energy prediction model (training, inference, evaluation) |
 | `optimization/` | HVAC and lighting optimisation under comfort constraints |
 | `security/` | Anomaly, attack and drift detection, alert management |
@@ -337,6 +339,46 @@ Later modules must publish messages in this form. Fields marked ? are optional.
 | `security_alerts` | `alert_id`, `zone_id`?, `source_event_id`?, `detected_at`, `alert_type` (anomaly/attack/drift/validation), `severity` (low/medium/high/critical), `detector`, `score`?, `description`, `details`?, `status`?, `resolved_at`? |
 | `optimization_commands`, `agent_actions` | `action_id`, `zone_id`, `created_at`, `updated_at`?, `source` (optimizer/agent/operator/baseline), `action_type` (set_setpoint/set_hvac_mode/set_lighting/clear_overrides), `parameters` (object), `status`, `reason`?, `safety_reason`?, `related_alert_id`? |
 
+## Weather and carbon-intensity data
+
+`workers.external_data_publisher` polls the configured providers and publishes to `weather_data`
+and `carbon_intensity`. `workers.record_persistence` stores the values in PostgreSQL
+(`weather_records`, `carbon_intensity_records`), and `workers.energy_processor` uses the latest
+observed carbon intensity to compute CO₂e for every energy record.
+
+| Data | Provider | API key | Content |
+|---|---|---|---|
+| Weather | **Open-Meteo** (`WEATHER_PROVIDER=open-meteo`) | none (non-commercial) | Temperature, humidity, wind speed, cloud cover, solar radiation. Current conditions (15 min), past hours and an hourly forecast. |
+| Carbon | **Electricity Maps** (`CARBON_PROVIDER=electricitymaps`) | `ELECTRICITY_MAPS_API_KEY` (free at portal.electricitymaps.com) | Latest grid intensity (gCO₂e/kWh) for the building's location or `ELECTRICITY_MAPS_ZONE`, plus the last 24 h for back-fill |
+| Carbon | **UK Carbon Intensity** (`CARBON_PROVIDER=uk-carbon-intensity`) | none | Great Britain only. Actual values and a 24 h forecast |
+| Both | **Mock** (`WEATHER_PROVIDER=mock`, `CARBON_PROVIDER=mock`) | none | **Synthetic** data for offline development, stored with `source='mock'` |
+
+Set the building location with `BUILDING_LATITUDE` / `BUILDING_LONGITUDE`. API keys are read only
+from environment variables; they are never logged or written to cache files.
+
+```powershell
+python -m workers.external_data_publisher                          # poll every 15 min
+python -m workers.external_data_publisher --once --backfill-hours 24
+python -m workers.record_persistence                               # stores the values
+```
+
+For offline development, set `WEATHER_PROVIDER=mock` and `CARBON_PROVIDER=mock` in `.env`.
+Mock rows can be excluded from analysis with `WHERE source <> 'mock'`.
+
+**Handling API limits and failures:**
+
+- *Caching:* responses are cached in memory and in `data/cache/` for 15 min, so restarts do not
+  use up quota. Electricity Maps is called at most every 5 min.
+- *Retries:* timeouts, connection errors and HTTP 5xx are retried with exponential back-off.
+- *Rate limits:* HTTP 429 pauses the client for the `Retry-After` time.
+- *Bad API key:* HTTP 401/403 is reported as an authentication error and retried after 1 h.
+- *Repeated failures:* the client pauses with growing back-off. Meanwhile, cached data up to 6 h
+  old can be served (flagged as stale).
+- *Duplicates:* event ids are deterministic (UUID5 of source, location, time and forecast flag),
+  so re-publishing the same observation never creates duplicate rows.
+- *Missing data:* the energy processor uses only *observed* (not forecast) carbon values, and
+  only the newest one. If no carbon data has arrived, CO₂e stays NULL.
+
 ## Verify the environment
 
 ```powershell
@@ -355,8 +397,8 @@ python app.py                                         # then open http://127.0.0
 | 2 | Building simulator | ✅ Done |
 | 3 | Kafka infrastructure (Docker, producers/consumers) | ✅ Done |
 | 4 | Data processing and PostgreSQL persistence | ✅ Done |
-| 5 | Weather and carbon-intensity data | ⏳ Next |
-| 6 | Energy prediction (XGBoost) | Planned |
+| 5 | Weather and carbon-intensity data | ✅ Done |
+| 6 | Energy prediction (XGBoost) | ⏳ Next |
 | 7 | HVAC/lighting optimisation (SciPy) | Planned |
 | 8 | Cyberattack simulation | Planned |
 | 9 | Anomaly and drift detection | Planned |

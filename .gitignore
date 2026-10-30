@@ -34,6 +34,7 @@ ml/artifacts/
 # Generated data
 data/raw/
 data/processed/
+data/cache/
 
 # Jupyter
 .ipynb_checkpoints/

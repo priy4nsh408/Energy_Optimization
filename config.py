@@ -409,6 +409,66 @@ class SimulatorSettings:
         )
 
 
+@dataclass(frozen=True)
+class ExternalDataSettings:
+    """Weather (Open-Meteo) and carbon-intensity (Electricity Maps / UK grid) sources.
+
+    ``mock`` providers generate clearly labelled synthetic data (``source="mock"``)
+    for offline development. API keys are read from the environment only and are
+    never written to logs or cache files.
+    """
+
+    WEATHER_PROVIDERS: ClassVar[tuple[str, ...]] = ("open-meteo", "mock")
+    CARBON_PROVIDERS: ClassVar[tuple[str, ...]] = ("electricitymaps", "uk-carbon-intensity", "mock")
+
+    latitude: float = 40.42
+    longitude: float = -3.70
+    weather_provider: str = "open-meteo"
+    open_meteo_base_url: str = "https://api.open-meteo.com/v1"
+    open_meteo_api_key: str = field(default="", repr=False)
+    weather_poll_interval_s: int = 900
+    weather_forecast_hours: int = 24
+    carbon_provider: str = "electricitymaps"
+    electricity_maps_base_url: str = "https://api.electricitymaps.com/v3"
+    electricity_maps_api_key: str = field(default="", repr=False)
+    electricity_maps_zone: str = ""
+    carbon_poll_interval_s: int = 900
+    cache_dir: Path = BASE_DIR / "data" / "cache"
+    http_timeout_s: float = 10.0
+    http_max_retries: int = 3
+
+    def __post_init__(self) -> None:
+        if not -90 <= self.latitude <= 90 or not -180 <= self.longitude <= 180:
+            raise ConfigurationError("BUILDING_LATITUDE/LONGITUDE out of range.")
+        if self.weather_provider not in self.WEATHER_PROVIDERS:
+            raise ConfigurationError(
+                f"WEATHER_PROVIDER must be one of {list(self.WEATHER_PROVIDERS)}.")
+        if self.carbon_provider not in self.CARBON_PROVIDERS:
+            raise ConfigurationError(
+                f"CARBON_PROVIDER must be one of {list(self.CARBON_PROVIDERS)}.")
+
+    @classmethod
+    def from_env(cls) -> "ExternalDataSettings":
+        return cls(
+            latitude=_get_float("BUILDING_LATITUDE", 40.42, minimum=-90, maximum=90),
+            longitude=_get_float("BUILDING_LONGITUDE", -3.70, minimum=-180, maximum=180),
+            weather_provider=_get_str("WEATHER_PROVIDER", "open-meteo").lower(),
+            open_meteo_base_url=_get_str("OPEN_METEO_BASE_URL", "https://api.open-meteo.com/v1"),
+            open_meteo_api_key=_get_str("OPEN_METEO_API_KEY", ""),
+            weather_poll_interval_s=_get_int("WEATHER_POLL_INTERVAL_S", 900, minimum=60),
+            weather_forecast_hours=_get_int("WEATHER_FORECAST_HOURS", 24, minimum=0, maximum=384),
+            carbon_provider=_get_str("CARBON_PROVIDER", "electricitymaps").lower(),
+            electricity_maps_base_url=_get_str("ELECTRICITY_MAPS_BASE_URL",
+                                               "https://api.electricitymaps.com/v3"),
+            electricity_maps_api_key=_get_str("ELECTRICITY_MAPS_API_KEY", ""),
+            electricity_maps_zone=_get_str("ELECTRICITY_MAPS_ZONE", ""),
+            carbon_poll_interval_s=_get_int("CARBON_POLL_INTERVAL_S", 900, minimum=60),
+            cache_dir=_resolve_path(_get_str("EXTERNAL_DATA_CACHE_DIR", "data/cache")),
+            http_timeout_s=_get_float("HTTP_TIMEOUT_S", 10.0, minimum=1, maximum=120),
+            http_max_retries=_get_int("HTTP_MAX_RETRIES", 3, minimum=0, maximum=10),
+        )
+
+
 # --------------------------------------------------------------------------- #
 # Environment-specific configuration classes
 # --------------------------------------------------------------------------- #
@@ -451,6 +511,7 @@ class BaseConfig:
         )
         self.DATABASE = DatabaseSettings.from_env(name_suffix=self.DATABASE_NAME_SUFFIX)
         self.SIMULATOR = SimulatorSettings.from_env()
+        self.EXTERNAL_DATA = ExternalDataSettings.from_env()
         self.LOGGING = LoggingSettings.from_env(
             default_level=self.DEFAULT_LOG_LEVEL,
             default_file_enabled=self.DEFAULT_LOG_TO_FILE,
@@ -475,6 +536,8 @@ class BaseConfig:
             "kafka_bootstrap_servers": self.KAFKA.bootstrap_servers,
             "kafka_topic_prefix": self.KAFKA.topic_prefix,
             "database": self.DATABASE.safe_dsn,
+            "weather_provider": self.EXTERNAL_DATA.weather_provider,
+            "carbon_provider": self.EXTERNAL_DATA.carbon_provider,
             "simulator": (f"{self.SIMULATOR.building_id} every {self.SIMULATOR.interval_seconds}s"
                           f" at {self.SIMULATOR.speed_factor}x"),
             "log_level": self.LOGGING.level,
