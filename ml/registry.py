@@ -38,7 +38,7 @@ class ModelNotFoundError(FileNotFoundError):
 class ModelBundle:
     model: Any
     model_name: str
-    spec: FeatureSpec
+    spec: Any                    # FeatureSpec (time series) or TabularSpec
     feature_names: list[str]
     version: str
     metadata: dict[str, Any]
@@ -51,7 +51,7 @@ def _atomic_write(path: Path, text: str) -> None:
     os.replace(tmp, path)
 
 
-def save_bundle(model: Any, model_name: str, spec: FeatureSpec, feature_names: list[str],
+def save_bundle(model: Any, model_name: str, spec: Any, feature_names: list[str],
                 metadata: dict[str, Any], root: Path = ARTIFACT_ROOT) -> ModelBundle:
     version = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     directory = root / spec.name / version
@@ -84,5 +84,11 @@ def load_bundle(spec_name: str, version: str | None = None, root: Path = ARTIFAC
         raise ModelNotFoundError(f"Model files missing in {directory}")
     payload = joblib.load(directory / "model.joblib")
     metadata = json.loads((directory / "metadata.json").read_text(encoding="utf-8"))
-    return ModelBundle(payload["model"], payload["model_name"], FeatureSpec.from_dict(payload["spec"]),
+    if payload["spec"].get("spec_type") == "tabular":
+        from ml.tabular import TabularSpec
+
+        spec = TabularSpec.from_dict(payload["spec"])
+    else:
+        spec = FeatureSpec.from_dict(payload["spec"])
+    return ModelBundle(payload["model"], payload["model_name"], spec,
                        list(payload["feature_names"]), payload["version"], metadata)

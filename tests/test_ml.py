@@ -340,3 +340,78 @@ def test_building_dataset_from_postgres_and_accuracy_view(db, building_bundle):
     with db.transaction() as conn:
         rows = conn.execute("SELECT count(*), avg(abs_error_kw) FROM prediction_accuracy").fetchone()
     assert rows[0] == len(producer.sent) == 5 * (20 - 12) and rows[1] is not None
+
+
+# --------------------------------------------------------------------------- cross-sectional datasets
+def write_building_csv(path: Path, rows: int = 120, noise: float = 0.0, seed: int = 0) -> Path:
+    rng = np.random.default_rng(seed)
+    kinds = rng.choice(["Residential", "Commercial", "Industrial"], rows)
+    days = rng.choice(["Weekday", "Weekend"], rows)
+    sqft, occ = rng.integers(1000, 50000, rows), rng.integers(1, 100, rows)
+    appl, temp = rng.integers(1, 50, rows), rng.uniform(10, 35, rows).round(2)
+    energy = (2000 + 0.05 * sqft + 10 * occ + 20 * appl - 5 * temp
+              + np.select([kinds == "Industrial", kinds == "Residential"], [500, -500], 0)
+              + np.where(days == "Weekday", 25, -25) + rng.normal(0, noise, rows)).round(2)
+    pd.DataFrame({"Building Type": kinds, "Square Footage": sqft, "Number of Occupants": occ,
+                  "Appliances Used": appl, "Average Temperature": temp, "Day of Week": days,
+                  "Energy Consumption": energy}).to_csv(path, index=False)
+    return path
+
+
+def write_customer_csv(path: Path, rows: int = 300, seed: int = 0) -> Path:
+    rng = np.random.default_rng(seed)
+    occupants = rng.integers(1, 5, rows)
+    df = pd.DataFrame({"customer_id": [f"CUSTOMER_{i:04d}" for i in range(rows)],
+                       "customer_type": rng.choice(["residential", "commercial"], rows),
+                       "regions": rng.choice(["North", "South", "Midwest"], rows),
+                       "building_size_m2": rng.integers(17, 78, rows), "occupants": occupants})
+    df["energy_cost_brl"] = (50 + 12 * occupants + rng.normal(0, 10, rows)).round(2)
+    df = pd.concat([df, df.iloc[:3].assign(customer_id=["DUP1", "DUP2", "DUP3"])])   # duplicates without id
+    df.to_csv(path, index=False)
+    return path
+
+
+def test_load_tabular_cleans_and_drops_identifiers(tmp_path):
+    from ml.tabular import CUSTOMER_COST_SPEC, load_tabular
+
+    df, info = load_tabular(CUSTOMER_COST_SPEC, write_customer_csv(tmp_path / "c.csv"))
+    assert "customer_id" not in df.columns and info.dropped_rows["duplicate_rows"] == 3
+    assert len(df) == 300 and info.sha256
+    bad = tmp_path / "bad.csv"
+    bad.write_text("customer_type,occupants\nresidential,2\n", encoding="utf-8")
+    with pytest.raises(DatasetError, match="missing columns"):
+        load_tabular(CUSTOMER_COST_SPEC, bad)
+
+
+def test_cross_validation_and_linear_structure(tmp_path):
+    from ml.tabular import BUILDING_ENERGY_SPEC, cross_validate, linear_structure, load_tabular
+
+    exact, _ = load_tabular(BUILDING_ENERGY_SPEC, write_building_csv(tmp_path / "exact.csv"))
+    assert linear_structure(BUILDING_ENERGY_SPEC, exact)["deterministic_linear"]
+    noisy, _ = load_tabular(BUILDING_ENERGY_SPEC, write_building_csv(tmp_path / "noisy.csv", noise=300))
+    assert not linear_structure(BUILDING_ENERGY_SPEC, noisy)["deterministic_linear"]
+
+    cv = cross_validate(BUILDING_ENERGY_SPEC, noisy, folds=3, repeats=2)
+    assert set(cv) == {"mean (naive)", "linear_regression", "random_forest", "xgboost"}
+    assert all(m["folds"] == 6 for m in cv.values())
+    assert cv["linear_regression"]["r2_mean"] > cv["mean (naive)"]["r2_mean"]
+    assert cv["mean (naive)"]["r2_mean"] < 0.05
+
+
+def test_tabular_training_report_and_bundle(tmp_path):
+    from ml.tabular import BUILDING_ENERGY_SPEC, TabularPredictor, TabularSpec
+    from ml.train import render_tabular_report, train_tabular
+
+    path = write_building_csv(tmp_path / "b.csv", rows=60)
+    spec = replace(BUILDING_ENERGY_SPEC, path=path)
+    bundle = train_tabular(spec, None, random_state=0, artifact_root=tmp_path / "artifacts", folds=3, repeats=1)
+    report = render_tabular_report(bundle.metadata)
+    assert "exact linear function" in report and "| xgboost |" in report
+    loaded = load_bundle(spec.name, root=tmp_path / "artifacts")
+    assert isinstance(loaded.spec, TabularSpec) and loaded.spec.target == "Energy Consumption"
+    record = {"Building Type": "Commercial", "Square Footage": 20000, "Number of Occupants": 30,
+              "Appliances Used": 10, "Average Temperature": 20.0, "Day of Week": "Weekday"}
+    value = TabularPredictor(loaded.model, loaded.spec).predict([record])[0]
+    assert 2000 < value < 6000
+    with pytest.raises(ValueError, match="Missing input fields"):
+        TabularPredictor(loaded.model, loaded.spec).predict([{"Building Type": "Commercial"}])

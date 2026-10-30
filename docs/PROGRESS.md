@@ -5,7 +5,7 @@ Use this file to continue the work later, alone or in a new Claude session.
 
 - **Branch:** `claude/nifty-brown-uckrlo`
 - **Last completed module:** 8 (cybersecurity and data drift detection)
-- **Tests:** 273 passed, 1 skipped. The skipped test needs `data/raw/KAG_energydata_complete.csv`.
+- **Tests:** 277 passed, with Docker running and the three datasets in `data/raw/`.
 
 ## Module status
 
@@ -16,7 +16,7 @@ Use this file to continue the work later, alone or in a new Claude session.
 | 3 | Kafka integration | ✅ | `449b616` | `streaming/`, `python -m streaming.topics`, `workers.sensor_publisher`, `workers.topic_monitor` |
 | 4 | Data processing + PostgreSQL | ✅ | `ca07139` | `database/`, `processors/`, `python -m database init`, `workers.sensor_persistence`, `workers.energy_processor`, `workers.record_persistence` |
 | 5 | Weather + carbon data | ✅ | `66204b6` | `data_sources/`, `workers.external_data_publisher` |
-| 6 | Energy prediction (ML) | ✅ | `99c5b86` | `ml/`, `python -m ml.train`, `workers.prediction_service` |
+| 6 | Energy prediction (ML) | ✅ | `99c5b86` (+ three project datasets, see below) | `ml/`, `python -m ml.train --dataset all`, `workers.prediction_service` |
 | 7 | HVAC/lighting optimization | ✅ | `b89ba36`, `9061984` | `optimization/`, `workers.optimization_service`, `python -m experiments.comparison` |
 | 8 | Cybersecurity + drift detection | ✅ | `741c57c` | `simulator/attack_simulator.py`, `security/`, `python -m security.train`, `workers.security_service`, `python -m experiments.cyberattack_experiment` |
 | 9 | Safety layer and action execution | ⏳ next | | |
@@ -52,7 +52,7 @@ These are git-ignored, either because they are large or because they are generat
 | What | How to recreate |
 |---|---|
 | `.env` | `copy .env.example .env`, then set `POSTGRES_PASSWORD` (Docker default `change_me`), `BUILDING_LATITUDE/LONGITUDE`, and `CARBON_PROVIDER` plus `ELECTRICITY_MAPS_API_KEY`, or `mock` |
-| KAG dataset | Download `KAG_energydata_complete.csv` (Kaggle) into `data/raw/`. The results so far used the identical UCI file `energydata_complete.csv` (SHA-256 `2820bf71…a25d`) from the author's GitHub. |
+| Project datasets | Copy your three files into `data/raw/` with these exact names: `KAG_energydata_complete.csv` (SHA-256 `2820bf71…a25d`), `test_energy_data.csv` (`01c85f8d…26da`) and `energy_consumption.csv` (`74cfb5a3…9301`). Then run `python -m ml.train --dataset all --report docs/results/energy_prediction_combined.md`. |
 | Building history in PostgreSQL | Run `python -m workers.sensor_persistence` in one terminal, and in another: `python -m workers.sensor_publisher --fast --interval 1 --speed 300 --ticks 8064 --seed 2026 --start 2026-01-05T00:00` |
 | ML models (`ml/artifacts/`) | `python -m ml.train --dataset kag`, then `python -m ml.train --dataset building --start 2026-01-05T00:00+00:00 --end 2026-02-02T00:00+00:00` |
 | Security detectors (`security/artifacts/`) | `python -m security.train` (28 clean simulated days, seed 2026) |
@@ -70,6 +70,9 @@ These are git-ignored, either because they are large or because they are generat
   Message contracts are in `processors/data_validator.py` and `README.md`.
 - **Lifecycles.** Action status goes `proposed → approved/rejected → executed/failed`; alert status
   goes `open → acknowledged → resolved`. Database upserts only move status forward.
+- **Three datasets.** They are trained separately and *not pooled*, because their targets and units
+  differ. KAG is a time series (chronological split); the other two are cross-sectional (repeated
+  K-fold CV). `test_energy_data.csv` is formula-generated synthetic data (Linear Regression R² = 1).
 - **ML.** The KAG dataset is the research benchmark. The *deployed* model is trained on the
   building's own Kafka-derived history, because KAG features don't exist in the stream.
 - **Optimizer.** Deterministic SciPy SLSQP, with no LLM involved. It publishes `approved`/`rejected`
