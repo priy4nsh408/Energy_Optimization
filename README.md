@@ -720,6 +720,50 @@ persists, or derive these bounds from thermostat logic instead of history.
 - An attacker who knows the rules could craft physically consistent manipulations.
 - Drift detection of slow CO₂-sensor manipulation is disabled in four zones (too noisy).
 
+### Real data: drift and anomaly detection on KAG
+
+Two experiments use the real KAG house data (January–May 2016) to show how the system behaves when
+the data drift and when sensors are attacked.
+
+**1. Data drift and model accuracy.** Run `python -m experiments.kag_drift_analysis --report docs/results/kag_drift_analysis.md`.
+It uses the same chronological split as Module 6:
+
+- *Test vs. training:* 21 of 26 features drift significantly (PSI ≥ 0.25), and all 26 differ by the KS test.
+- *Indoor temperatures:* mean PSI 7.45. 38.7 % of test values lie outside the training range.
+- *Model accuracy:* on each test day, both drift measures are correlated with how much worse XGBoost does
+  than Linear Regression (Spearman, n = 41 days):
+  - the mean PSI of the indoor temperatures: ρ = 0.63;
+  - the share of values outside the training range: ρ = 0.69.
+
+  This explains why the tree models fall behind Linear Regression on the test period.
+- *Figures:* `docs/results/figures/kag_drift_*.png`.
+
+**2. Injected attacks on real data.** Run `python -m experiments.kag_anomaly_experiment --period test --report docs/results/kag_anomaly_detection.md`.
+
+- *Detectors:* replay, rate-of-change, room-consistency residual, meter value-domain and range
+  rules, Isolation Forest, plus a per-room CUSUM for slow manipulation.
+- *Calibration:* on clean validation data (April). This period was also used for development.
+- *Test:* 20 days in May, run once.
+
+| Point detection (test) | Precision | Recall | F1 | False-positive rate |
+|---|---|---|---|---|
+| Rules + Isolation Forest | 0.674 | 0.833 | 0.745 | 1.09 % |
+
+What the test showed:
+
+- *Spoofing and replay:* all readings were detected (recall 1.0), with 0-minute latency.
+- *Abnormal power:* both attacks were detected (after 20 and 40 minutes), but only 33 % of the
+  readings were flagged. Appliance energy is naturally spiky.
+- *Slow manipulation:*
+  - The Module 8 KS + PSI window tests raised false alarms on 49–80 % of clean real-data windows.
+    Calibration therefore disabled all of them. Real, autocorrelated residuals violate the
+    test's assumptions.
+  - The CUSUM detected the 0.4 °C/h ramp after 8.5 h (3.4 °C offset).
+  - It missed the 0.2 °C/h ramp.
+  - It raised 2 unexplained alarms in 20 days.
+- *Disclosure:* one development diagnostic also printed CUSUM values for the test period. This is
+  stated in the report.
+
 ## Verify the environment
 
 ```powershell

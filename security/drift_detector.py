@@ -95,8 +95,9 @@ class DriftReference:
 
     values: dict = field(default_factory=lambda: defaultdict(list))
 
-    def add(self, zone_id: str, when: datetime, row: dict[str, float]) -> None:
-        for feature in DRIFT_FEATURES:
+    def add(self, zone_id: str, when: datetime, row: dict[str, float],
+            features: tuple[str, ...] = DRIFT_FEATURES) -> None:
+        for feature in features:
             value = row.get(feature)
             if value is not None and not np.isnan(value):
                 self.values[(zone_id, feature, when.weekday() >= 5, when.hour)].append(value)
@@ -159,3 +160,62 @@ class DriftDetector:
             features.append(FeatureDrift(feature, float(ks.statistic), float(ks.pvalue), psi, shifted,
                                          mean_shift))
         return DriftResult(zone_id, times[0], times[-1], tuple(features), tuple(drifting))
+
+
+@dataclass
+class RollingDriftDetector:
+    """Drift against a *recent* reference instead of fixed training data.
+
+    The current ``window`` is compared with the *same time of day* on the
+    previous ``reference_days`` days (``period`` readings per day), so the daily
+    cycle is matched and slow seasonal change (weeks) is absorbed by the moving
+    reference, while changes over hours (e.g. gradual sensor manipulation) are
+    detected. Same KS + PSI + effect-size + persistence criteria as
+    :class:`DriftDetector`. Useful for real data with strong seasonality.
+    """
+
+    features: tuple[str, ...]
+    window: int = 36
+    period: int = 144
+    reference_days: int = 3
+    step: int = 6
+    ks_alpha: float = 0.01
+    psi_threshold: float = 0.25
+    min_effect_size: float = 0.5
+    persistence: int = 2
+    disabled: frozenset = frozenset()
+    _history: dict = field(default_factory=dict)
+    _times: deque = field(default_factory=deque)
+    _count: int = 0
+    _streak: dict = field(default_factory=lambda: defaultdict(int))
+
+    def update(self, zone_id: str, when: datetime, row: dict[str, float]) -> DriftResult | None:
+        size = self.window + self.period * self.reference_days
+        for feature in self.features:
+            self._history.setdefault(feature, deque(maxlen=size)).append(row[feature])
+        self._times.append(when)
+        if len(self._times) > size:
+            self._times.popleft()
+        self._count += 1
+        if len(self._times) < size or self._count % self.step:
+            return None
+        results, drifting = [], []
+        for feature in self.features:
+            if (zone_id, feature) in self.disabled:
+                continue
+            values = np.array(self._history[feature], dtype=float)
+            current = values[-self.window:]
+            reference = np.concatenate([values[len(values) - self.window - k * self.period:
+                                               len(values) - k * self.period]
+                                        for k in range(1, self.reference_days + 1)])
+            ks = ks_2samp(current, reference)
+            psi = population_stability_index(reference, current)
+            mean_shift = float(current.mean() - reference.mean())
+            effect = abs(mean_shift) / max(float(reference.std()), 1e-9)
+            shifted = ks.pvalue < self.ks_alpha and psi >= self.psi_threshold and effect >= self.min_effect_size
+            self._streak[feature] = self._streak[feature] + 1 if shifted else 0
+            if self._streak[feature] >= self.persistence:
+                drifting.append(feature)
+            results.append(FeatureDrift(feature, float(ks.statistic), float(ks.pvalue), psi, shifted, mean_shift))
+        times = list(self._times)
+        return DriftResult(zone_id, times[-self.window], times[-1], tuple(results), tuple(drifting))

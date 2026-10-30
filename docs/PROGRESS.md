@@ -5,7 +5,7 @@ Use this file to continue the work later, alone or in a new Claude session.
 
 - **Branch:** `claude/nifty-brown-uckrlo`
 - **Last completed module:** 8 (cybersecurity and data drift detection)
-- **Tests:** 277 passed, with Docker running and the three datasets in `data/raw/`.
+- **Tests:** 286 passed, with Docker running and the three datasets in `data/raw/`.
 
 ## Module status
 
@@ -25,6 +25,16 @@ Use this file to continue the work later, alone or in a new Claude session.
 | 12 | Experiments and evaluation | planned | | |
 
 Measured results are in `docs/results/` and summarised in `README.md`.
+
+**Real-data demonstration (after Module 8):** two experiments run on the KAG data.
+
+- *Data drift:* `experiments/kag_drift_analysis.py`. It quantifies the drift and links it to the
+  model's accuracy loss.
+- *Attacks:* `experiments/kag_anomaly_experiment.py`. It injects attacks and evaluates point
+  detection, KS/PSI drift and CUSUM.
+
+The results are in the README section *Real data: drift and anomaly detection on KAG*. The new
+`RollingDriftDetector` is in `security/drift_detector.py`.
 
 ## Resume on a new machine (Windows)
 
@@ -95,7 +105,10 @@ These are git-ignored, either because they are large or because they are generat
 4. **External APIs.** The live Open-Meteo / Electricity Maps / UK grid clients are untested against
    real responses; the cloud environment blocked those hosts. Run
    `python -m workers.external_data_publisher --once` locally to verify.
-5. **Windows.** Not yet run on Windows; developed and tested on Linux.
+5. **Slow manipulation on real data.** The KS/PSI window drift tests are unusable on KAG
+   (false alarms on 49–80 % of clean windows). CUSUM works only for faster ramps: it detected
+   0.4 °C/h and missed 0.2 °C/h.
+6. **Windows.** Not yet run on Windows; developed and tested on Linux.
 
 ## Next step: Module 9 (safety layer and action execution)
 
