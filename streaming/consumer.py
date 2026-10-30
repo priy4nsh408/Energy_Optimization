@@ -88,6 +88,7 @@ class JsonConsumer:
 
     def __init__(self, settings: KafkaSettings, group_name: str, topics: Sequence[str], *,
                  max_handler_retries: int = 3, retry_backoff_s: float = 0.5,
+                 auto_offset_reset: str | None = None,
                  consumer_factory: Callable[[dict[str, Any]], Any] = Consumer) -> None:
         if not topics:
             raise ValueError("At least one topic is required.")
@@ -99,6 +100,10 @@ class JsonConsumer:
         self.stats = ConsumerStats()
         config = with_client_logging(settings.consumer_config(group_name), f"consumer.{group_name}")
         config["client.id"] = f"{settings.client_id}.{group_name}"
+        if auto_offset_reset is not None:
+            # Where a *new* group starts: "latest" for real-time services that
+            # should not process historical backlog.
+            config["auto.offset.reset"] = auto_offset_reset
         self.group_id = config["group.id"]
         self._consumer = consumer_factory(config)
         self._subscribed = False

@@ -155,3 +155,19 @@ class InvalidEventRecord:
     zone_id: str | None
     errors: list[str]
     payload: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class EnergyPredictionRecord:
+    prediction_id: UUID
+    source_event_id: UUID
+    building_id: str
+    zone_id: str
+    event_time: datetime
+    predicted_for: datetime
+    horizon_seconds: float
+    predicted_power_kw: float
+    predicted_energy_kwh: float
+    model_name: str
+    model_version: str
+    created_at: datetime

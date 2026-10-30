@@ -24,6 +24,7 @@ from uuid import UUID
 
 from database.models import (
     CarbonIntensityRecord,
+    EnergyPredictionRecord,
     OptimizationActionRecord,
     SecurityAlertRecord,
     SensorReadingRecord,
@@ -286,3 +287,26 @@ def validate_action_message(message: Any, *, topic: str | None = None) -> Optimi
     )
     c.raise_if_invalid()
     return record
+
+
+def validate_prediction_message(message: Any) -> EnergyPredictionRecord:
+    """Contract for ``energy_predictions``."""
+    c = _Checker(message)
+    record = dict(
+        prediction_id=c.uuid("prediction_id"),
+        source_event_id=c.uuid("source_event_id"),
+        building_id=c.text("building_id", max_length=64),
+        zone_id=c.text("zone_id", pattern=ZONE_ID_PATTERN),
+        event_time=c.timestamp("event_time"),
+        predicted_for=c.timestamp("predicted_for"),
+        horizon_seconds=c.number("horizon_seconds", 0.001, 86_400),
+        predicted_power_kw=c.number("predicted_power_kw", 0, 10_000),
+        predicted_energy_kwh=c.number("predicted_energy_kwh", 0, 1_000_000),
+        model_name=c.text("model_name", max_length=100),
+        model_version=c.text("model_version", max_length=100),
+        created_at=c.timestamp("created_at"),
+    )
+    if record["event_time"] and record["predicted_for"] and record["predicted_for"] <= record["event_time"]:
+        c.errors.append("predicted_for: must be after event_time")
+    c.raise_if_invalid()
+    return EnergyPredictionRecord(**record)

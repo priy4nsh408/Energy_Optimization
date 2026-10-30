@@ -20,6 +20,7 @@ from psycopg.types.json import Jsonb
 
 from database.models import (
     CarbonIntensityRecord,
+    EnergyPredictionRecord,
     EnergyRecord,
     InvalidEventRecord,
     OptimizationActionRecord,
@@ -35,6 +36,7 @@ TABLES: dict[type, str] = {
     WeatherRecord: "weather_records",
     CarbonIntensityRecord: "carbon_intensity_records",
     InvalidEventRecord: "invalid_events",
+    EnergyPredictionRecord: "energy_predictions",
 }
 
 ALERT_STATUS_RANK = {"open": 0, "acknowledged": 1, "resolved": 2}
@@ -157,6 +159,6 @@ def latest_carbon_intensity(conn: psycopg.Connection, at: datetime | None = None
 def table_counts(conn: psycopg.Connection) -> dict[str, int]:
     tables = ["zones", "sensor_readings", "energy_records", "weather_records",
               "carbon_intensity_records", "security_alerts", "optimization_actions",
-              "invalid_events"]
+              "energy_predictions", "invalid_events"]
     return {t: conn.execute(sql.SQL("SELECT count(*) FROM {}").format(sql.Identifier(t))).fetchone()[0]
             for t in tables}

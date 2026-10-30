@@ -216,3 +216,36 @@ FROM energy_records
 GROUP BY zone_id, date_trunc('hour', event_time);
 
 INSERT INTO schema_version (version) VALUES (1) ON CONFLICT DO NOTHING;
+
+-- ==========================================================================
+-- Version 2: ML energy predictions (workers.prediction_service)
+-- ==========================================================================
+CREATE TABLE IF NOT EXISTS energy_predictions (
+    prediction_id           UUID PRIMARY KEY,
+    source_event_id         UUID NOT NULL,          -- sensor event the prediction was made from
+    building_id             TEXT NOT NULL,
+    zone_id                 TEXT NOT NULL,
+    event_time              TIMESTAMPTZ NOT NULL,   -- time of the latest reading used
+    predicted_for           TIMESTAMPTZ NOT NULL,   -- end of the predicted interval (= its reading's event_time)
+    horizon_seconds         DOUBLE PRECISION NOT NULL CHECK (horizon_seconds > 0),
+    predicted_power_kw      DOUBLE PRECISION NOT NULL CHECK (predicted_power_kw >= 0),
+    predicted_energy_kwh    DOUBLE PRECISION NOT NULL CHECK (predicted_energy_kwh >= 0),
+    model_name              TEXT NOT NULL,
+    model_version           TEXT NOT NULL,
+    created_at              TIMESTAMPTZ NOT NULL,
+    ingested_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (source_event_id, model_version)
+);
+CREATE INDEX IF NOT EXISTS ix_energy_predictions_zone_time ON energy_predictions (zone_id, predicted_for DESC);
+
+-- Online accuracy: each prediction joined with the reading that ends at predicted_for.
+CREATE OR REPLACE VIEW prediction_accuracy AS
+SELECT
+    p.prediction_id, p.zone_id, p.model_version, p.event_time, p.predicted_for,
+    p.predicted_power_kw,
+    s.energy_kwh * 3600 / s.interval_seconds                        AS actual_power_kw,
+    abs(p.predicted_power_kw - s.energy_kwh * 3600 / s.interval_seconds) AS abs_error_kw
+FROM energy_predictions p
+JOIN sensor_readings s ON s.zone_id = p.zone_id AND s.event_time = p.predicted_for;
+
+INSERT INTO schema_version (version) VALUES (2) ON CONFLICT DO NOTHING;

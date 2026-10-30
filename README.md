@@ -15,7 +15,8 @@ simulator ──► [sensor_publisher] ─────────────�
                                                                          ├─► [energy_processor] ────► PostgreSQL
 Open-Meteo, Electricity Maps ──► [external_data_publisher] ──► weather_data, carbon_intensity
                                                                          └─► [record_persistence] ──► PostgreSQL
-planned: ml_worker, optimizer, security_worker ──► security_alerts ──► agent (LangGraph)
+building_sensor_data ──► [prediction_service] ──► energy_predictions ──► [record_persistence]
+planned: optimizer, security_worker ──► security_alerts ──► agent (LangGraph)
          ──► agent_actions ──► safety layer ──► optimization_commands ──► simulator
          Flask + Socket.IO dashboard ◄── dashboard bridge (Kafka → Socket.IO) + PostgreSQL history
 ```
@@ -41,7 +42,8 @@ Design rules:
 | `processors/` | Message validation, feature engineering, energy/carbon calculations (no I/O) |
 | `database/` | PostgreSQL schema (`schema.sql`), connection pool, records, repositories, admin CLI |
 | `data_sources/` | Weather (Open-Meteo) and carbon-intensity (Electricity Maps, UK grid) providers, cached HTTP client, mock providers |
-| `ml/` | Energy prediction model (training, inference, evaluation) |
+| `ml/` | Energy prediction: dataset loading, leakage-safe features, models, training, evaluation, model registry, inference |
+| `docs/results/` | Generated evaluation reports (from real training runs) |
 | `optimization/` | HVAC and lighting optimisation under comfort constraints |
 | `security/` | Anomaly, attack and drift detection, alert management |
 | `agent/` | Agentic AI (LangGraph) and safety validation |
@@ -379,6 +381,101 @@ Mock rows can be excluded from analysis with `WHERE source <> 'mock'`.
 - *Missing data:* the energy processor uses only *observed* (not forecast) carbon values, and
   only the newest one. If no carbon data has arrived, CO₂e stays NULL.
 
+## Energy consumption prediction (ML)
+
+The task is to predict the **next interval's** energy use from information available now. The
+pipeline (`ml/`) is dataset-agnostic and runs on two datasets:
+
+| | KAG / UCI dataset (primary benchmark) | Building data (deployed model) |
+|---|---|---|
+| Source | `data/raw/KAG_energydata_complete.csv`: one house, 10-min readings, Jan–May 2016 | `sensor_readings` in PostgreSQL (Kafka-derived) |
+| Target | `Appliances` (Wh per 10 min) | Average power per zone (kW) |
+| Used by | Research comparison | `workers.prediction_service` (real time) |
+
+The KAG model cannot be fed from Kafka: its features (nine rooms of a house) do not exist in the
+building's sensor events. The service therefore deploys the model trained on the building's own
+history, using the same pipeline, and refuses to load the KAG model.
+
+**Get the dataset.** Download `KAG_energydata_complete.csv` from Kaggle (or `energydata_complete.csv`
+from the UCI "Appliances energy prediction" dataset by Candanedo et al.) into `data/raw/`. The file
+is git-ignored. The SHA-256 of each file used is recorded with the model.
+
+**Avoiding data leakage:**
+
+- Features for time *t* use only values up to *t*: current and lagged target, rolling statistics,
+  sensors at *t*, and calendar features of the target time.
+- Lags are invalidated across gaps in the data.
+- The split is chronological: 70 % train, 15 % validation, 15 % test. Boundary rows whose target
+  would fall in the next split are removed.
+- Scaling is fitted inside the pipeline on training data only. XGBoost early-stops on the
+  validation set, and the test set is used once, for the final evaluation.
+- A test checks that changing future rows never changes past features.
+
+**Models:**
+
+- Linear Regression (baseline)
+- Random Forest
+- XGBoost (primary model, the one saved and deployed)
+- a naive *persistence* forecast (next value = current value), as a reference point
+
+```powershell
+python -m ml.train --dataset kag                                   # or --data path\to\file.csv
+python -m ml.train --dataset building --start 2026-01-05T00:00+00:00 --end 2026-02-02T00:00+00:00
+python -m workers.prediction_service                               # real-time predictions
+```
+
+Models are saved in `ml/artifacts/<dataset>/<version>/` (`model.joblib`, `metadata.json`,
+`report.md`). The metadata includes metrics, dataset hash, split dates and library versions.
+
+**Real-time service.**
+
+- Consumes `building_sensor_data` and validates each event.
+- Keeps 13 readings of history per zone and computes features with the same code as training.
+- Publishes the predicted next-interval power and energy to `energy_predictions`.
+- `record_persistence` stores the predictions (`energy_predictions` table, schema version 2).
+- The `prediction_accuracy` view joins each prediction with the actual reading.
+- A new service instance starts at the latest offset, so it does not replay the historical
+  backlog. It warns if the live reading interval differs from the training interval.
+
+To create building training history (4 simulated weeks at 5-minute resolution, run with
+`workers.sensor_persistence`):
+
+```powershell
+python -m workers.sensor_publisher --fast --interval 1 --speed 300 --ticks 8064 --seed 2026 --start 2026-01-05T00:00
+```
+
+### Results
+
+The full reports, generated by the training runs, are in
+`docs/results/energy_prediction_kag.md` and `docs/results/energy_prediction_building.md`.
+
+**KAG test set** (2016-05-07 to 2016-05-27, 2,939 rows, Appliances in Wh per 10 min):
+
+| Model | MAE | RMSE | R² |
+|---|---|---|---|
+| Persistence (naive) | 26.7 | 66.8 | 0.461 |
+| Linear Regression | 27.2 | 60.4 | 0.559 |
+| Random Forest | 46.9 | 76.3 | 0.296 |
+| XGBoost | 34.6 | 63.5 | 0.512 |
+
+On validation (April–May), XGBoost was best: R² 0.601 against 0.569 for Linear Regression. On the
+later test period, Linear Regression generalised best, and the tree models lost accuracy. The likely
+cause is seasonal distribution shift: training covers January to mid-April, so late-May indoor
+temperatures lie outside the training range, and tree models cannot extrapolate. No model beats
+persistence on MAE; the models improve RMSE and R² by predicting large spikes better.
+
+These numbers were *not* tuned on the test set. The tree models' test results also changed slightly
+between library versions (XGBoost R² 0.521 with pandas 2.3, 0.512 with pandas 3.1). Results are
+reproducible within one environment.
+
+**Building data** (simulated, Kafka-derived, 5-min intervals):
+
+- Test-set MAE: XGBoost 0.116 kW, Random Forest 0.112 kW, persistence 0.158 kW.
+- Pooled R² is about 0.99 but misleading, because it mixes zones with very different load levels.
+  Within each zone, XGBoost's R² is 0.72 (server room) to 0.99; see the per-zone table in the
+  report.
+- The data is synthetic and therefore easier to predict than real measurements.
+
 ## Verify the environment
 
 ```powershell
@@ -398,8 +495,8 @@ python app.py                                         # then open http://127.0.0
 | 3 | Kafka infrastructure (Docker, producers/consumers) | ✅ Done |
 | 4 | Data processing and PostgreSQL persistence | ✅ Done |
 | 5 | Weather and carbon-intensity data | ✅ Done |
-| 6 | Energy prediction (XGBoost) | ⏳ Next |
-| 7 | HVAC/lighting optimisation (SciPy) | Planned |
+| 6 | Energy prediction (XGBoost) | ✅ Done |
+| 7 | HVAC/lighting optimisation (SciPy) | ⏳ Next |
 | 8 | Cyberattack simulation | Planned |
 | 9 | Anomaly and drift detection | Planned |
 | 10 | Safety layer and action execution | Planned |

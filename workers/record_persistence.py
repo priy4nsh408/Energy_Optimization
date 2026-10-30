@@ -1,4 +1,4 @@
-"""Service: store weather, carbon, security alerts and optimization/agent actions.
+"""Service: store weather, carbon, alerts, optimization/agent actions and energy predictions.
 
     python -m workers.record_persistence
 """
@@ -17,6 +17,7 @@ from processors.data_validator import (
     validate_action_message,
     validate_alert_message,
     validate_carbon_message,
+    validate_prediction_message,
     validate_weather_message,
 )
 from processors.sensor_processor import validate_or_reject
@@ -24,6 +25,7 @@ from streaming.consumer import ConsumedMessage
 from streaming.topics import (
     AGENT_ACTIONS,
     CARBON_INTENSITY,
+    ENERGY_PREDICTIONS,
     OPTIMIZATION_COMMANDS,
     SECURITY_ALERTS,
     WEATHER_DATA,
@@ -31,7 +33,8 @@ from streaming.topics import (
 from workers.base import PersistenceHandler, parse_worker_args, run_worker
 
 SERVICE = "record_persistence"
-TOPICS = [WEATHER_DATA, CARBON_INTENSITY, SECURITY_ALERTS, OPTIMIZATION_COMMANDS, AGENT_ACTIONS]
+TOPICS = [WEATHER_DATA, CARBON_INTENSITY, SECURITY_ALERTS, OPTIMIZATION_COMMANDS, AGENT_ACTIONS,
+          ENERGY_PREDICTIONS]
 
 
 class RecordPersistenceHandler(PersistenceHandler):
@@ -43,6 +46,8 @@ class RecordPersistenceHandler(PersistenceHandler):
             validator, writer = validate_weather_message, insert_record
         elif topic == CARBON_INTENSITY:
             validator, writer = validate_carbon_message, insert_record
+        elif topic == ENERGY_PREDICTIONS:
+            validator, writer = validate_prediction_message, insert_record
         elif topic == SECURITY_ALERTS:
             validator, writer = validate_alert_message, upsert_security_alert
         elif topic in (OPTIMIZATION_COMMANDS, AGENT_ACTIONS):

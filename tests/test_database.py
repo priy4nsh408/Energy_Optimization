@@ -51,7 +51,7 @@ def count(db, table, where="TRUE"):
 
 def test_schema_is_idempotent_and_versioned(db):
     db.apply_schema()
-    assert db.schema_version() == 1
+    assert db.schema_version() == 2
     db.require_schema()
     with db.transaction() as conn:
         assert set(fetch_zones(conn)) == {"Z1", "Z2", "Z3", "Z4", "Z5"}

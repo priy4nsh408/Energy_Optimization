@@ -26,6 +26,9 @@ REQUIRED_PACKAGES = {
     "psycopg_pool": "psycopg-pool",
     "dotenv": "python-dotenv",
     "requests": "requests",
+    "pandas": "pandas",
+    "sklearn": "scikit-learn",
+    "xgboost": "xgboost",
 }
 
 
