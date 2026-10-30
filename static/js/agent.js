@@ -130,8 +130,10 @@
   async function loadActions() {
     const source = document.getElementById("filter-source").value;
     const {rows} = await api(`/api/agent/actions?limit=200&source=${encodeURIComponent(source)}`);
+    // created_at is simulated time; updated_at is the wall-clock time of the latest status change.
+    rows.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
     document.getElementById("action-table").innerHTML = rows.length ? rows.map((a) => `<tr>
-      <td class="text-nowrap">${fmt.time(a.updated_at)}</td><td>${escapeHtml(a.zone_id)}</td>
+      <td class="text-nowrap">${fmt.time(a.created_at)}</td><td>${escapeHtml(a.zone_id)}</td>
       <td>${escapeHtml(SOURCES[a.source] || a.source)}</td>
       <td><strong>${escapeHtml(Glossary.action(a.action_type, a.parameters))}</strong><div class="text-muted">${escapeHtml(a.reason || "")}</div></td>
       <td>${safety(a.status, a.status === "rejected" ? a.safety_reason : "")}</td>
