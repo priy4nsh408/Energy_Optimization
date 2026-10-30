@@ -33,7 +33,7 @@ def test_app_env_selects_testing(clean_env):
     assert isinstance(cfg, TestingConfig)
     assert cfg.TESTING is True
     assert cfg.DATABASE.name == "smart_building_test"
-    assert cfg.KAFKA.topic("sensor.readings") == "test.sensor.readings"
+    assert cfg.KAFKA.topic("building_sensor_data") == "test.building_sensor_data"
     assert cfg.LOGGING.file_enabled is False
 
 
@@ -126,8 +126,10 @@ def test_kafka_client_configs(clean_env):
     assert consumer["enable.auto.commit"] is False
     with pytest.raises(ConfigurationError):
         cfg.KAFKA.consumer_config("")
-    with pytest.raises(ConfigurationError, match="Unknown Kafka topic"):
-        cfg.KAFKA.topic("not.a.topic")
+    with pytest.raises(ConfigurationError):
+        cfg.KAFKA.topic("")
+    assert cfg.KAFKA.admin_config()["bootstrap.servers"] == "localhost:9092"
+    assert producer["message.timeout.ms"] == 120000
 
 
 def test_kafka_sasl_config(clean_env):

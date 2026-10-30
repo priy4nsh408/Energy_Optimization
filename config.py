@@ -141,17 +141,12 @@ class KafkaSettings:
     auto_offset_reset: str = "earliest"
     producer_acks: str = "all"
     request_timeout_ms: int = 10000
-
-    # Logical topic names. The physical name is ``topic_prefix + name``.
-    TOPIC_NAMES: ClassVar[tuple[str, ...]] = (
-        "sensor.readings",
-        "external.context",
-        "energy.predictions",
-        "control.recommendations",
-        "security.alerts",
-        "agent.proposals",
-        "control.commands",
-    )
+    # How long the producer keeps retrying a message (e.g. while the broker
+    # restarts) before reporting it as failed.
+    message_timeout_ms: int = 120000
+    reconnect_backoff_ms: int = 500
+    reconnect_backoff_max_ms: int = 10000
+    replication_factor: int = 1
 
     @classmethod
     def from_env(cls, *, default_topic_prefix: str = "") -> "KafkaSettings":
@@ -172,14 +167,19 @@ class KafkaSettings:
             ),
             producer_acks=_get_choice("KAFKA_PRODUCER_ACKS", "all", {"0", "1", "all"}),
             request_timeout_ms=_get_int("KAFKA_REQUEST_TIMEOUT_MS", 10000, minimum=1000),
+            message_timeout_ms=_get_int("KAFKA_MESSAGE_TIMEOUT_MS", 120000, minimum=1000),
+            reconnect_backoff_ms=_get_int("KAFKA_RECONNECT_BACKOFF_MS", 500, minimum=10),
+            reconnect_backoff_max_ms=_get_int("KAFKA_RECONNECT_BACKOFF_MAX_MS", 10000, minimum=10),
+            replication_factor=_get_int("KAFKA_REPLICATION_FACTOR", 1, minimum=1),
         )
 
     def topic(self, name: str) -> str:
-        """Return the physical topic name for a logical topic name."""
-        if name not in self.TOPIC_NAMES:
-            raise ConfigurationError(
-                f"Unknown Kafka topic '{name}'. Known topics: {list(self.TOPIC_NAMES)}"
-            )
+        """Return the physical topic name (``topic_prefix + name``).
+
+        The list of valid topics lives in ``streaming.topics``.
+        """
+        if not name:
+            raise ConfigurationError("Kafka topic name must not be empty.")
         return f"{self.topic_prefix}{name}"
 
     def _common_config(self) -> dict[str, Any]:
@@ -187,6 +187,10 @@ class KafkaSettings:
             "bootstrap.servers": self.bootstrap_servers,
             "client.id": self.client_id,
             "security.protocol": self.security_protocol,
+            # librdkafka reconnects automatically; these bound the retry rate.
+            "reconnect.backoff.ms": self.reconnect_backoff_ms,
+            "reconnect.backoff.max.ms": self.reconnect_backoff_max_ms,
+            "socket.keepalive.enable": True,
         }
         if self.security_protocol.startswith("SASL"):
             config.update({
@@ -202,9 +206,15 @@ class KafkaSettings:
             **self._common_config(),
             "acks": self.producer_acks,
             "enable.idempotence": self.producer_acks == "all",
-            "message.timeout.ms": self.request_timeout_ms * 3,
+            "message.timeout.ms": self.message_timeout_ms,
             "request.timeout.ms": self.request_timeout_ms,
+            "linger.ms": 20,
+            "compression.type": "lz4",
         }
+
+    def admin_config(self) -> dict[str, Any]:
+        """Configuration dict for ``confluent_kafka.admin.AdminClient``."""
+        return self._common_config()
 
     def consumer_config(self, group_name: str) -> dict[str, Any]:
         """Configuration dict for ``confluent_kafka.Consumer``.
@@ -219,6 +229,7 @@ class KafkaSettings:
             **self._common_config(),
             "group.id": f"{self.consumer_group_prefix}.{group_name}",
             "auto.offset.reset": self.auto_offset_reset,
+            # Offsets are committed by the consumer after successful processing.
             "enable.auto.commit": False,
             "session.timeout.ms": max(self.request_timeout_ms, 6000),
         }

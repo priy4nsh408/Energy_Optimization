@@ -22,15 +22,20 @@ from simulator.engine import BuildingSimulator, json_lines_sink
 from utils.logging_config import configure_logging
 
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="python -m simulator",
-                                     description="Run the smart building simulator.")
+def add_simulation_arguments(parser: argparse.ArgumentParser) -> None:
+    """Options shared by every command that runs the simulator."""
     parser.add_argument("--interval", type=float, help="seconds between readings (1-5)")
     parser.add_argument("--speed", type=float, help="simulated seconds per real second")
     parser.add_argument("--ticks", type=int, help="stop after N readings per zone")
     parser.add_argument("--seed", type=int, help="random seed for a reproducible run")
     parser.add_argument("--start", help="simulated start time, ISO 8601 (e.g. 2026-01-15T08:00)")
     parser.add_argument("--fast", action="store_true", help="do not wait between ticks")
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog="python -m simulator",
+                                     description="Run the smart building simulator.")
+    add_simulation_arguments(parser)
     parser.add_argument("--output", type=Path, help="write JSON Lines to this file instead of stdout")
     return parser.parse_args(argv)
 

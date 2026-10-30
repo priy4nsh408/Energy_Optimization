@@ -11,11 +11,10 @@ is executed. A Flask + Socket.IO dashboard shows everything live.
 ## Architecture
 
 ```
-simulator (producer) ──► sensor.readings ─┬─► db_writer ─────────────► PostgreSQL
-attack simulator ─────► (injects into)    ├─► ml_worker ──► energy.predictions
-weather / carbon APIs ─► external.context ├─► security_worker ──► security.alerts
-                                          └─► optimizer ──► control.recommendations
-agent (LangGraph) ◄── alerts ──► agent.proposals ──► safety layer ──► control.commands ──► simulator
+simulator ──► [sensor_publisher] ──► building_sensor_data ─┬─► db_writer ───────────► PostgreSQL
+weather / carbon APIs ──► weather_data, carbon_intensity ──┼─► ml_worker / optimizer
+                                                           ├─► security_worker ──► security_alerts
+agent (LangGraph) ◄── security_alerts ──► agent_actions ──► safety layer ──► optimization_commands ──► simulator
 Flask + Socket.IO dashboard ◄── dashboard bridge (Kafka → Socket.IO) + PostgreSQL history
 ```
 
@@ -35,7 +34,8 @@ Design rules:
 | `scripts/check_environment.py` | Verifies Python, packages, configuration and service connectivity |
 | `simulator/` | Five-zone building physics, occupancy, outdoor climate and sensor simulation (attack simulation added later) |
 | `docs/sample_output/` | Sample simulator output (JSON Lines) |
-| `streaming/` | Kafka producer/consumer wrappers and topic definitions (named `streaming` so it does not shadow Kafka client libraries) |
+| `streaming/` | Kafka topic registry, JSON producer/consumer, connection helpers (named `streaming` so it does not shadow Kafka client libraries) |
+| `workers/` | Long-running services, one process each (sensor publisher, topic monitor, later DB/ML/security workers) |
 | `processors/` | Stream processing, validation and feature engineering |
 | `database/` | PostgreSQL schema and data access |
 | `data_sources/` | Weather and carbon-intensity APIs |
@@ -178,12 +178,81 @@ Example event (from `docs/sample_output/sensor_events_sample.jsonl`):
 }
 ```
 
+## Apache Kafka
+
+Kafka is the event backbone. Each service is its own process with its own consumer group.
+Flask never consumes Kafka.
+
+### Topics
+
+| Topic | Partitions | Key | Retention | Content |
+|---|---|---|---|---|
+| `building_sensor_data` | 5 | `zone_id` | 7 d | Simulator sensor readings |
+| `weather_data` | 1 | `building_id` | 30 d | Weather observations/forecasts |
+| `carbon_intensity` | 1 | `building_id` | 30 d | Grid carbon intensity |
+| `security_alerts` | 3 | `zone_id` | 30 d | Anomaly/attack/drift alerts |
+| `optimization_commands` | 3 | `zone_id` | 7 d | Validated HVAC/lighting commands |
+| `agent_actions` | 3 | `zone_id` | 30 d | Agent proposals and decisions (audit) |
+
+The registry lives in `streaming/topics.py`. `KAFKA_TOPIC_PREFIX` is prepended to every name;
+the testing environment uses `test.`. Topics are created explicitly, because broker
+auto-creation is disabled.
+
+### Reliability
+
+- **Serialization:** messages are UTF-8 JSON objects. Sensor events are keyed by `zone_id`, so each
+  zone always goes to one partition and its readings stay in order.
+- **Producer:** idempotent with `acks=all`, so a retry cannot create duplicate messages. Every
+  delivery report is counted (`sent/delivered/failed`) and failures are logged. When the local
+  queue is full, it waits and retries.
+- **Disconnections:** librdkafka reconnects automatically with back-off. The producer keeps
+  undelivered messages for `KAFKA_MESSAGE_TIMEOUT_MS` (default 2 min), and consumers resume from
+  their committed offsets. Services wait for the broker at start-up.
+- **Consumer:**
+  - Offsets are committed manually, after processing, which gives at-least-once delivery.
+    **Handlers must be idempotent** (use `event_id`), because messages can be redelivered after a
+    rebalance or broker restart.
+  - Invalid JSON is logged and skipped.
+  - A failing handler is retried with back-off, then the message is skipped.
+  - Fatal client errors stop the service.
+
+### Run it
+
+Start Docker Desktop first.
+
+```powershell
+docker compose -f docker/docker-compose.yml --env-file .env up -d   # Kafka + PostgreSQL
+python -m streaming.topics                                           # create topics (idempotent)
+python -m streaming.topics --list                                    # show the registry
+```
+
+Then run each service in its own terminal:
+
+```powershell
+python -m workers.sensor_publisher --interval 2 --speed 60          # simulator -> Kafka
+python -m workers.topic_monitor --group db_writer_demo              # consumer service 1
+python -m workers.topic_monitor --group security_demo --quiet       # independent consumer 2
+```
+
+The two monitors use different consumer groups, so each receives every reading. Starting a
+second monitor with the *same* `--group` splits the partitions between the two instances. Stop
+any service with Ctrl+C; it shuts down cleanly and commits its offsets.
+
+To test a broker restart:
+
+```powershell
+docker restart smart-building-kafka
+```
+
+The services log the disconnection, reconnect, and continue without losing messages.
+
 ## Verify the environment
 
 ```powershell
 python -m scripts.check_environment                   # Python, packages, configuration
 python -m scripts.check_environment --check-services  # also probe Kafka and PostgreSQL
-python -m pytest                                      # unit tests
+python -m pytest                                      # unit + Kafka integration tests
+python -m pytest -m "not kafka"                       # skip tests that need a broker
 python app.py                                         # then open http://127.0.0.1:5000/health
 ```
 
@@ -193,8 +262,8 @@ python app.py                                         # then open http://127.0.0
 |---|---|---|
 | 1 | Project setup and configuration | ✅ Done |
 | 2 | Building simulator | ✅ Done |
-| 3 | Kafka infrastructure (Docker, producers/consumers) | ⏳ Next |
-| 4 | PostgreSQL persistence | Planned |
+| 3 | Kafka infrastructure (Docker, producers/consumers) | ✅ Done |
+| 4 | PostgreSQL persistence | ⏳ Next |
 | 5 | Weather and carbon-intensity data | Planned |
 | 6 | Energy prediction (XGBoost) | Planned |
 | 7 | HVAC/lighting optimisation (SciPy) | Planned |
