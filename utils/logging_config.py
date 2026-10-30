@@ -18,7 +18,7 @@ import logging.handlers
 import re
 import sys
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, TextIO
 
 from config import LoggingSettings
 
@@ -74,8 +74,12 @@ class TextFormatter(logging.Formatter):
         return base
 
 
-def configure_logging(settings: LoggingSettings, service_name: str) -> logging.Logger:
+def configure_logging(settings: LoggingSettings, service_name: str,
+                      stream: TextIO | None = None) -> logging.Logger:
     """Configure the root logger for one process and return a service logger.
+
+    ``stream`` defaults to stdout; pass ``sys.stderr`` when stdout carries data
+    (e.g. the simulator writing JSON events).
 
     Calling this more than once replaces the handlers it previously installed,
     so it is safe to call from tests and from Flask's reloader.
@@ -92,7 +96,7 @@ def configure_logging(settings: LoggingSettings, service_name: str) -> logging.L
             handler.close()
     root.setLevel(settings.level)
 
-    console = logging.StreamHandler(sys.stdout)
+    console = logging.StreamHandler(stream or sys.stdout)
     console.setFormatter(formatter)
     setattr(console, _HANDLER_MARKER, True)
     root.addHandler(console)

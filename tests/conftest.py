@@ -7,7 +7,8 @@ import os
 import pytest
 
 # Prefixes of every environment variable read by config.py.
-_CONFIG_PREFIXES = ("APP_", "SECRET_KEY", "FLASK_", "SOCKETIO_", "KAFKA_", "POSTGRES_", "LOG_")
+_CONFIG_PREFIXES = ("APP_", "SECRET_KEY", "FLASK_", "SOCKETIO_", "KAFKA_", "POSTGRES_", "LOG_",
+                    "SIM_")
 
 
 @pytest.fixture

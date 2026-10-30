@@ -23,6 +23,7 @@ from __future__ import annotations
 import os
 import secrets
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -63,6 +64,22 @@ def _get_int(name: str, default: int, *, minimum: int | None = None,
         value = int(raw)
     except ValueError as exc:
         raise ConfigurationError(f"'{name}' must be an integer, got '{raw}'.") from exc
+    if minimum is not None and value < minimum:
+        raise ConfigurationError(f"'{name}' must be >= {minimum}, got {value}.")
+    if maximum is not None and value > maximum:
+        raise ConfigurationError(f"'{name}' must be <= {maximum}, got {value}.")
+    return value
+
+
+def _get_float(name: str, default: float, *, minimum: float | None = None,
+               maximum: float | None = None) -> float:
+    raw = _get_str(name)
+    if raw == "":
+        return default
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ConfigurationError(f"'{name}' must be a number, got '{raw}'.") from exc
     if minimum is not None and value < minimum:
         raise ConfigurationError(f"'{name}' must be >= {minimum}, got {value}.")
     if maximum is not None and value > maximum:
@@ -290,6 +307,94 @@ class LoggingSettings:
         )
 
 
+@dataclass(frozen=True)
+class SimulatorSettings:
+    """Settings for the building simulator (``simulator`` package).
+
+    ``interval_seconds`` is the wall-clock time between readings.
+    ``speed_factor`` is simulated seconds per wall-clock second, so each
+    reading covers ``interval_seconds * speed_factor`` simulated seconds.
+    The outdoor climate parameters drive the built-in synthetic outdoor
+    model, which is used until the weather API module provides real data.
+    """
+
+    building_id: str = "building-01"
+    interval_seconds: float = 2.0
+    speed_factor: float = 1.0
+    start_time: datetime | None = None
+    random_seed: int | None = None
+    physics_step_seconds: float = 60.0
+    latitude_deg: float = 40.0
+    utc_offset_hours: float = 0.0
+    outdoor_annual_mean_c: float = 15.0
+    outdoor_seasonal_amplitude_c: float = 10.0
+    outdoor_diurnal_amplitude_c: float = 5.0
+
+    MIN_INTERVAL_SECONDS: ClassVar[float] = 1.0
+    MAX_INTERVAL_SECONDS: ClassVar[float] = 5.0
+    MAX_SPEED_FACTOR: ClassVar[float] = 3600.0
+
+    def __post_init__(self) -> None:
+        if not self.building_id:
+            raise ConfigurationError("Simulator building_id must not be empty.")
+        if not self.MIN_INTERVAL_SECONDS <= self.interval_seconds <= self.MAX_INTERVAL_SECONDS:
+            raise ConfigurationError(
+                f"Simulator interval_seconds must be between {self.MIN_INTERVAL_SECONDS} "
+                f"and {self.MAX_INTERVAL_SECONDS}, got {self.interval_seconds}."
+            )
+        if not 0 < self.speed_factor <= self.MAX_SPEED_FACTOR:
+            raise ConfigurationError(
+                f"Simulator speed_factor must be in (0, {self.MAX_SPEED_FACTOR}], "
+                f"got {self.speed_factor}."
+            )
+        if not 1 <= self.physics_step_seconds <= 300:
+            raise ConfigurationError("Simulator physics_step_seconds must be between 1 and 300.")
+        if not -90 <= self.latitude_deg <= 90:
+            raise ConfigurationError("Simulator latitude_deg must be between -90 and 90.")
+        if not -12 <= self.utc_offset_hours <= 14:
+            raise ConfigurationError("Simulator utc_offset_hours must be between -12 and 14.")
+        if self.outdoor_seasonal_amplitude_c < 0 or self.outdoor_diurnal_amplitude_c < 0:
+            raise ConfigurationError("Simulator outdoor amplitudes must be >= 0.")
+
+    @property
+    def tzinfo(self) -> timezone:
+        """Fixed-offset time zone of the building (no tzdata needed on Windows)."""
+        return timezone(timedelta(hours=self.utc_offset_hours))
+
+    @property
+    def simulated_seconds_per_tick(self) -> float:
+        return self.interval_seconds * self.speed_factor
+
+    @classmethod
+    def from_env(cls) -> "SimulatorSettings":
+        utc_offset = _get_float("SIM_UTC_OFFSET_HOURS", 0.0, minimum=-12, maximum=14)
+        start_raw = _get_str("SIM_START_TIME")
+        start_time: datetime | None = None
+        if start_raw:
+            try:
+                start_time = datetime.fromisoformat(start_raw)
+            except ValueError as exc:
+                raise ConfigurationError(
+                    f"'SIM_START_TIME' must be an ISO 8601 datetime, got '{start_raw}'."
+                ) from exc
+            if start_time.tzinfo is None:
+                start_time = start_time.replace(tzinfo=timezone(timedelta(hours=utc_offset)))
+        seed_raw = _get_str("SIM_RANDOM_SEED")
+        return cls(
+            building_id=_get_str("SIM_BUILDING_ID", "building-01"),
+            interval_seconds=_get_float("SIM_INTERVAL_SECONDS", 2.0),
+            speed_factor=_get_float("SIM_SPEED_FACTOR", 1.0),
+            start_time=start_time,
+            random_seed=_get_int("SIM_RANDOM_SEED", 0) if seed_raw else None,
+            physics_step_seconds=_get_float("SIM_PHYSICS_STEP_SECONDS", 60.0),
+            latitude_deg=_get_float("SIM_LATITUDE", 40.0),
+            utc_offset_hours=utc_offset,
+            outdoor_annual_mean_c=_get_float("SIM_OUTDOOR_ANNUAL_MEAN_C", 15.0),
+            outdoor_seasonal_amplitude_c=_get_float("SIM_OUTDOOR_SEASONAL_AMPLITUDE_C", 10.0),
+            outdoor_diurnal_amplitude_c=_get_float("SIM_OUTDOOR_DIURNAL_AMPLITUDE_C", 5.0),
+        )
+
+
 # --------------------------------------------------------------------------- #
 # Environment-specific configuration classes
 # --------------------------------------------------------------------------- #
@@ -331,6 +436,7 @@ class BaseConfig:
             default_topic_prefix=self.KAFKA_DEFAULT_TOPIC_PREFIX
         )
         self.DATABASE = DatabaseSettings.from_env(name_suffix=self.DATABASE_NAME_SUFFIX)
+        self.SIMULATOR = SimulatorSettings.from_env()
         self.LOGGING = LoggingSettings.from_env(
             default_level=self.DEFAULT_LOG_LEVEL,
             default_file_enabled=self.DEFAULT_LOG_TO_FILE,
@@ -355,6 +461,8 @@ class BaseConfig:
             "kafka_bootstrap_servers": self.KAFKA.bootstrap_servers,
             "kafka_topic_prefix": self.KAFKA.topic_prefix,
             "database": self.DATABASE.safe_dsn,
+            "simulator": (f"{self.SIMULATOR.building_id} every {self.SIMULATOR.interval_seconds}s"
+                          f" at {self.SIMULATOR.speed_factor}x"),
             "log_level": self.LOGGING.level,
             "log_format": self.LOGGING.fmt,
             "log_to_file": self.LOGGING.file_enabled,
