@@ -1,0 +1,969 @@
+{
+  "evaluation": {
+    "start": "2026-02-09T00:00:00+00:00",
+    "days": 4.0,
+    "seeds": [
+      101,
+      202,
+      303
+    ],
+    "attacks": [
+      "temperature_spoofing:Z1:2040:120:offset_c=4",
+      "occupancy_manipulation:Z3:2100:120:mode=hide",
+      "abnormal_power:Z4:2340:60:factor=3",
+      "replay:Z2:2460:120:lag=288",
+      "gradual_manipulation:Z4:3000:720:rate_c_per_h=0.4"
+    ],
+    "warmup_hours": 24.0,
+    "recovery_quiet_s": 3600.0,
+    "comfort_band": [
+      20.0,
+      25.0
+    ],
+    "detector_training_days": 28.0,
+    "detector_training_seed": 2026,
+    "detector_training_start": "2026-01-05T00:00:00+00:00",
+    "original_detectors": null,
+    "optimizer_detectors": "20261030T165511Z",
+    "ml_model_version": null
+  },
+  "scenarios": {
+    "baseline": {
+      "optimizer": false,
+      "attacks": false,
+      "defense": false
+    },
+    "optimized": {
+      "optimizer": true,
+      "attacks": false,
+      "defense": false
+    },
+    "attack_undefended": {
+      "optimizer": true,
+      "attacks": true,
+      "defense": false
+    },
+    "attack_defended": {
+      "optimizer": true,
+      "attacks": true,
+      "defense": true
+    }
+  },
+  "versions": {
+    "ml_model": "20261030T072815Z",
+    "original_detectors": "20261030T082728Z",
+    "optimizer_detectors": "20261030T165511Z"
+  },
+  "detectors_trained_in_this_run": false,
+  "ml_model": {
+    "version": "20261030T072815Z",
+    "model": "xgboost",
+    "metadata": {
+      "created_at": "2026-10-30T07:28:15.854309+00:00",
+      "data_interval_seconds": 300.0,
+      "task": "predict avg_power_kw 1 step(s) ahead",
+      "target_unit": "kW (average over interval)",
+      "dataset": {
+        "name": "building_sensor_readings",
+        "source": "postgresql:sensor_readings",
+        "rows": 40315,
+        "start": "2026-01-05T00:05:00+00:00",
+        "end": "2026-02-01T23:55:00+00:00",
+        "sha256": null,
+        "dropped_rows": {},
+        "notes": [
+          "zones: ['Z1', 'Z2', 'Z3', 'Z4', 'Z5']"
+        ]
+      },
+      "split": {
+        "train": {
+          "rows": 28170,
+          "start": "2026-01-05 01:05:00+00:00",
+          "end": "2026-01-24 14:30:00+00:00"
+        },
+        "validation": {
+          "rows": 6030,
+          "start": "2026-01-24 14:40:00+00:00",
+          "end": "2026-01-28 19:05:00+00:00"
+        },
+        "test": {
+          "rows": 6040,
+          "start": "2026-01-28 19:15:00+00:00",
+          "end": "2026-02-01 23:50:00+00:00"
+        },
+        "purged_boundary_rows": 10
+      },
+      "feature_rows_dropped_incomplete_history": 65,
+      "metrics": {
+        "persistence (naive)": {
+          "validation": {
+            "mae": 0.17071162189054725,
+            "rmse": 0.3981075754204687,
+            "r2": 0.9780990367481158,
+            "n": 6030
+          },
+          "test": {
+            "mae": 0.15762677483443704,
+            "rmse": 0.3590963632241278,
+            "r2": 0.9800110715003283,
+            "n": 6040
+          }
+        },
+        "linear_regression": {
+          "train": {
+            "mae": 0.18065607969716377,
+            "rmse": 0.38535660650391834,
+            "r2": 0.9792383190710406,
+            "n": 28170
+          },
+          "validation": {
+            "mae": 0.17739109076958903,
+            "rmse": 0.37210831960802676,
+            "r2": 0.980866206025465,
+            "n": 6030
+          },
+          "test": {
+            "mae": 0.16945312277244995,
+            "rmse": 0.34555032495106,
+            "r2": 0.981490694979904,
+            "n": 6040
+          }
+        },
+        "random_forest": {
+          "train": {
+            "mae": 0.06127295507228925,
+            "rmse": 0.13822844735478024,
+            "r2": 0.9973286440864421,
+            "n": 28170
+          },
+          "validation": {
+            "mae": 0.11394549385032339,
+            "rmse": 0.2195156450286177,
+            "r2": 0.9933412411129149,
+            "n": 6030
+          },
+          "test": {
+            "mae": 0.11202463420996124,
+            "rmse": 0.22020649229699482,
+            "r2": 0.992483290972685,
+            "n": 6040
+          }
+        },
+        "xgboost": {
+          "train": {
+            "mae": 0.08923228782124337,
+            "rmse": 0.13634267336935532,
+            "r2": 0.9974010345556084,
+            "n": 28170
+          },
+          "validation": {
+            "mae": 0.11599483083284,
+            "rmse": 0.19294714141209363,
+            "r2": 0.9948555490525893,
+            "n": 6030
+          },
+          "test": {
+            "mae": 0.11552816430643024,
+            "rmse": 0.207648984292067,
+            "r2": 0.993316143407979,
+            "n": 6040
+          }
+        }
+      },
+      "test_metrics_by_group": {
+        "Z1": {
+          "persistence (naive)": {
+            "mae": 0.2208136092715232,
+            "rmse": 0.5473139829982699,
+            "r2": 0.9616973045396752,
+            "n": 1208
+          },
+          "linear_regression": {
+            "mae": 0.24931402096595584,
+            "rmse": 0.5281159683695386,
+            "r2": 0.9643372484261288,
+            "n": 1208
+          },
+          "random_forest": {
+            "mae": 0.15814170362000252,
+            "rmse": 0.3242310963566309,
+            "r2": 0.9865579477405755,
+            "n": 1208
+          },
+          "xgboost": {
+            "mae": 0.16532860732762228,
+            "rmse": 0.3075666056236677,
+            "r2": 0.9879041996675118,
+            "n": 1208
+          }
+        },
+        "Z2": {
+          "persistence (naive)": {
+            "mae": 0.15146701986754968,
+            "rmse": 0.2829410609067194,
+            "r2": 0.9245366166227932,
+            "n": 1208
+          },
+          "linear_regression": {
+            "mae": 0.15400042273590367,
+            "rmse": 0.27170426202383685,
+            "r2": 0.930411540998358,
+            "n": 1208
+          },
+          "random_forest": {
+            "mae": 0.11035245294906772,
+            "rmse": 0.2074098628779602,
+            "r2": 0.959448854547483,
+            "n": 1208
+          },
+          "xgboost": {
+            "mae": 0.11611775805031226,
+            "rmse": 0.20111591194540976,
+            "r2": 0.9618726007003114,
+            "n": 1208
+          }
+        },
+        "Z3": {
+          "persistence (naive)": {
+            "mae": 0.07586523178807948,
+            "rmse": 0.15023109194863582,
+            "r2": 0.8978208398547549,
+            "n": 1208
+          },
+          "linear_regression": {
+            "mae": 0.08531713123343446,
+            "rmse": 0.1433202618556079,
+            "r2": 0.9070053708517154,
+            "n": 1208
+          },
+          "random_forest": {
+            "mae": 0.041362224365108516,
+            "rmse": 0.09986303456293598,
+            "r2": 0.9548505775963396,
+            "n": 1208
+          },
+          "xgboost": {
+            "mae": 0.049780655566973,
+            "rmse": 0.10157081627542341,
+            "r2": 0.9532931513301984,
+            "n": 1208
+          }
+        },
+        "Z4": {
+          "persistence (naive)": {
+            "mae": 0.1977430132450331,
+            "rmse": 0.4594708088833218,
+            "r2": 0.9546447246315096,
+            "n": 1208
+          },
+          "linear_regression": {
+            "mae": 0.2105449367646315,
+            "rmse": 0.43450064436066643,
+            "r2": 0.959440479902602,
+            "n": 1208
+          },
+          "random_forest": {
+            "mae": 0.13431272314004633,
+            "rmse": 0.24983590167797595,
+            "r2": 0.9865902200199135,
+            "n": 1208
+          },
+          "xgboost": {
+            "mae": 0.1297734621167341,
+            "rmse": 0.21855188326758163,
+            "r2": 0.9897382586388838,
+            "n": 1208
+          }
+        },
+        "Z5": {
+          "persistence (naive)": {
+            "mae": 0.14224499999999998,
+            "rmse": 0.17736951617329758,
+            "r2": 0.6059810627855988,
+            "n": 1208
+          },
+          "linear_regression": {
+            "mae": 0.14808910216232418,
+            "rmse": 0.18698648590715886,
+            "r2": 0.562095334500089,
+            "n": 1208
+          },
+          "random_forest": {
+            "mae": 0.11595406697558115,
+            "rmse": 0.14805146992073268,
+            "r2": 0.7254733062102656,
+            "n": 1208
+          },
+          "xgboost": {
+            "mae": 0.11664033847050953,
+            "rmse": 0.1498803524698098,
+            "r2": 0.7186489475797436,
+            "n": 1208
+          }
+        }
+      },
+      "fit_seconds": {
+        "linear_regression": 0.07,
+        "random_forest": 19.72,
+        "xgboost": 3.28
+      },
+      "xgboost_best_iteration": 796,
+      "feature_importance_gain_top20": [
+        [
+          "target_roll_mean3",
+          0.4818210005760193
+        ],
+        [
+          "target_lag0",
+          0.3860706090927124
+        ],
+        [
+          "target_lag1",
+          0.08852323144674301
+        ],
+        [
+          "hvac_power_kw",
+          0.006237895227968693
+        ],
+        [
+          "tgt_tod_sin",
+          0.004790031351149082
+        ],
+        [
+          "target_roll_mean6",
+          0.004344883840531111
+        ],
+        [
+          "tgt_tod_cos",
+          0.0030025052838027477
+        ],
+        [
+          "tgt_hour",
+          0.0024219066835939884
+        ],
+        [
+          "group_Z4",
+          0.0021886087488383055
+        ],
+        [
+          "lighting_power_kw",
+          0.0020404192619025707
+        ],
+        [
+          "occupancy_count",
+          0.0020189371425658464
+        ],
+        [
+          "appliance_power_kw",
+          0.0017067552544176579
+        ],
+        [
+          "hvac_heating",
+          0.0014432367170229554
+        ],
+        [
+          "lighting_level_pct",
+          0.0013676048256456852
+        ],
+        [
+          "temperature_c",
+          0.0011958432151004672
+        ],
+        [
+          "tgt_weekend",
+          0.0010947748087346554
+        ],
+        [
+          "group_Z1",
+          0.0010442703496664762
+        ],
+        [
+          "target_diff1",
+          0.0010167770087718964
+        ],
+        [
+          "hvac_setpoint_c",
+          0.0009990906110033393
+        ],
+        [
+          "target_lag2",
+          0.0007414830033667386
+        ]
+      ],
+      "random_state": 42,
+      "version": "20261030T072815Z",
+      "model_name": "xgboost",
+      "spec": {
+        "name": "building_zones",
+        "target": "avg_power_kw",
+        "target_unit": "kW (average over interval)",
+        "sensor_columns": [
+          "temperature_c",
+          "humidity_pct",
+          "co2_ppm",
+          "occupancy_count",
+          "lighting_level_pct",
+          "hvac_setpoint_c",
+          "hvac_power_kw",
+          "lighting_power_kw",
+          "appliance_power_kw",
+          "outdoor_temperature_c",
+          "outdoor_humidity_pct",
+          "hvac_heating",
+          "hvac_cooling",
+          "hvac_off"
+        ],
+        "lags": [
+          1,
+          2,
+          3,
+          6,
+          12
+        ],
+        "rolling_windows": [
+          3,
+          6,
+          12
+        ],
+        "horizon": 1,
+        "group_values": [
+          "Z1",
+          "Z2",
+          "Z3",
+          "Z4",
+          "Z5"
+        ],
+        "utc_offset_hours": 0.0
+      },
+      "feature_names": [
+        "target_lag0",
+        "target_lag1",
+        "target_lag2",
+        "target_lag3",
+        "target_lag6",
+        "target_lag12",
+        "target_diff1",
+        "target_roll_mean3",
+        "target_roll_std3",
+        "target_roll_mean6",
+        "target_roll_std6",
+        "target_roll_mean12",
+        "target_roll_std12",
+        "temperature_c",
+        "humidity_pct",
+        "co2_ppm",
+        "occupancy_count",
+        "lighting_level_pct",
+        "hvac_setpoint_c",
+        "hvac_power_kw",
+        "lighting_power_kw",
+        "appliance_power_kw",
+        "outdoor_temperature_c",
+        "outdoor_humidity_pct",
+        "hvac_heating",
+        "hvac_cooling",
+        "hvac_off",
+        "tgt_hour",
+        "tgt_dayofweek",
+        "tgt_weekend",
+        "tgt_tod_sin",
+        "tgt_tod_cos",
+        "group_Z1",
+        "group_Z2",
+        "group_Z3",
+        "group_Z4",
+        "group_Z5"
+      ],
+      "library_versions": {
+        "python": "3.13.17",
+        "sklearn": "1.9.1",
+        "xgboost": "3.4.1",
+        "joblib": "1.6.0"
+      }
+    }
+  },
+  "original_detectors": {
+    "created_at": "2026-10-30T08:27:28.674668+00:00",
+    "source": {
+      "type": "simulator",
+      "days": 28.0,
+      "seed": 2026,
+      "start": "2026-01-05T00:00:00+00:00"
+    },
+    "readings": 40320,
+    "start": "2026-01-05T00:05:00+00:00",
+    "end": "2026-02-02T00:00:00+00:00",
+    "validation_start": "2026-01-26T00:05:00+00:00",
+    "isolation_forest_thresholds": {
+      "Z1": 0.6287990966414952,
+      "Z2": 0.6118507139383882,
+      "Z3": 0.6541795114894896,
+      "Z4": 0.6281907160973095,
+      "Z5": 0.597244699218901
+    },
+    "threshold_quantile": 0.999,
+    "rule_limits": {
+      "Z1": {
+        "max_temperature_rate": 0.2400000000000002,
+        "max_occupancy_jump": 6.0,
+        "max_co2_rise_empty": 22.200000000000003,
+        "max_total_power": 21.4995,
+        "max_power_rate": 2.8878000000000004,
+        "control_error_range": {
+          "heating": [
+            -4.899999999999999,
+            0.3000000000000007
+          ],
+          "cooling": [
+            -0.3000000000000007,
+            1.3999999999999986
+          ],
+          "idle": [
+            -4.800000000000001,
+            2.6999999999999993
+          ]
+        },
+        "lighting_kw_per_level": [
+          2.5174999999999996,
+          2.8864500000000004
+        ],
+        "max_lighting_kw_when_off": 0.05,
+        "max_idle_hvac_kw": 0.9026000000000002,
+        "appliance_model": [
+          1.0040407281529393,
+          0.11962032845486505
+        ],
+        "max_appliance_residual_kw": 0.7810570662328965,
+        "co2_max_abs_residual": {
+          "false": 102.15350056558299,
+          "true": 102.1400709127798
+        }
+      },
+      "Z2": {
+        "max_temperature_rate": 0.2400000000000002,
+        "max_occupancy_jump": 4.5,
+        "max_co2_rise_empty": 24.299999999999997,
+        "max_total_power": 8.5605,
+        "max_power_rate": 1.1355,
+        "control_error_range": {
+          "heating": [
+            -4.899999999999999,
+            0.3000000000000007
+          ],
+          "cooling": [
+            -0.3000000000000007,
+            1.3000000000000007
+          ],
+          "idle": [
+            -4.800000000000001,
+            1.6999999999999993
+          ]
+        },
+        "lighting_kw_per_level": [
+          1.0060499999999999,
+          1.15605
+        ],
+        "max_lighting_kw_when_off": 0.05,
+        "max_idle_hvac_kw": 0.37024999999999997,
+        "appliance_model": [
+          0.4005443578392946,
+          0.14915513424767943
+        ],
+        "max_appliance_residual_kw": 0.35015099210016665,
+        "co2_max_abs_residual": {
+          "false": 94.5410857601077,
+          "true": 111.9574207418739
+        }
+      },
+      "Z3": {
+        "max_temperature_rate": 0.2400000000000002,
+        "max_occupancy_jump": 13.5,
+        "max_co2_rise_empty": 24.0,
+        "max_total_power": 4.002000000000001,
+        "max_power_rate": 0.7541999999999999,
+        "control_error_range": {
+          "heating": [
+            -4.800000000000001,
+            0.3000000000000007
+          ],
+          "cooling": [
+            -0.10000000000000142,
+            1.1000000000000014
+          ],
+          "idle": [
+            -4.800000000000001,
+            1.1000000000000014
+          ]
+        },
+        "lighting_kw_per_level": [
+          0.5605,
+          0.6405
+        ],
+        "max_lighting_kw_when_off": 0.05,
+        "max_idle_hvac_kw": 0.26315000000000005,
+        "appliance_model": [
+          0.14993229851885834,
+          0.05016996196186007
+        ],
+        "max_appliance_residual_kw": 0.14721668292191858,
+        "co2_max_abs_residual": {
+          "false": 262.0114456995201,
+          "true": 1404.743258532034
+        }
+      },
+      "Z4": {
+        "max_temperature_rate": 0.2400000000000002,
+        "max_occupancy_jump": 12.0,
+        "max_co2_rise_empty": 23.4,
+        "max_total_power": 21.057000000000002,
+        "max_power_rate": 2.4002999999999997,
+        "control_error_range": {
+          "heating": [
+            -4.800000000000001,
+            0.3000000000000007
+          ],
+          "cooling": [
+            -0.3000000000000007,
+            4.699999999999999
+          ],
+          "idle": [
+            -4.800000000000001,
+            4.800000000000001
+          ]
+        },
+        "lighting_kw_per_level": [
+          1.4914999999999998,
+          1.7115
+        ],
+        "max_lighting_kw_when_off": 0.05,
+        "max_idle_hvac_kw": 0.68945,
+        "appliance_model": [
+          1.997546087106188,
+          0.08045603076233745
+        ],
+        "max_appliance_residual_kw": 0.8792645266828203,
+        "co2_max_abs_residual": {
+          "false": 194.88288367720847,
+          "true": 162.43570145864524
+        }
+      },
+      "Z5": {
+        "max_temperature_rate": 0.18000000000000044,
+        "max_occupancy_jump": 3.0,
+        "max_co2_rise_empty": 26.099999999999998,
+        "max_total_power": 10.5315,
+        "max_power_rate": 0.2550000000000001,
+        "control_error_range": {
+          "cooling": [
+            -0.3000000000000007,
+            1.5
+          ]
+        },
+        "lighting_kw_per_level": null,
+        "max_lighting_kw_when_off": 0.05,
+        "max_idle_hvac_kw": 0.05,
+        "appliance_model": [
+          4.498285838293651,
+          0.0
+        ],
+        "max_appliance_residual_kw": 0.9434734127976193,
+        "co2_max_abs_residual": {
+          "false": 87.50985818181817,
+          "true": 90.0317019230769
+        }
+      }
+    },
+    "drift_monitor_false_alarm_rates": {
+      "Z1:control_error_active": 0.0,
+      "Z1:co2_residual": 0.32515337423312884,
+      "Z2:control_error_active": 0.0,
+      "Z2:co2_residual": 0.26380368098159507,
+      "Z3:control_error_active": 0.0,
+      "Z3:co2_residual": 0.38650306748466257,
+      "Z4:control_error_active": 0.012048192771084338,
+      "Z4:co2_residual": 0.17177914110429449,
+      "Z5:control_error_active": 0.0,
+      "Z5:co2_residual": 0.0
+    },
+    "disabled_drift_monitors": [
+      "Z1:co2_residual",
+      "Z2:co2_residual",
+      "Z3:co2_residual",
+      "Z4:co2_residual"
+    ],
+    "version": "20261030T082728Z"
+  },
+  "optimizer_detectors": {
+    "created_at": "2026-10-30T16:55:11.006474+00:00",
+    "source": {
+      "type": "simulator, optimizer-controlled (measured basis), no attacks",
+      "days": 28.0,
+      "seed": 2026,
+      "start": "2026-01-05T00:00:00+00:00"
+    },
+    "readings": 40320,
+    "start": "2026-01-05T00:05:00+00:00",
+    "end": "2026-02-02T00:00:00+00:00",
+    "validation_start": "2026-01-26T00:05:00+00:00",
+    "isolation_forest_thresholds": {
+      "Z1": 0.6594849415822648,
+      "Z2": 0.644551524136633,
+      "Z3": 0.7151576461494649,
+      "Z4": 0.6603544241458114,
+      "Z5": 0.6015978731222136
+    },
+    "threshold_quantile": 0.999,
+    "rule_limits": {
+      "Z1": {
+        "max_temperature_rate": 0.2699999999999996,
+        "max_occupancy_jump": 6.0,
+        "max_co2_rise_empty": 22.200000000000003,
+        "max_total_power": 20.302500000000002,
+        "max_power_rate": 3.6386999999999996,
+        "control_error_range": {
+          "heating": [
+            -4.600000000000001,
+            0.3000000000000007
+          ],
+          "cooling": [
+            -0.1999999999999993,
+            1.8999999999999986
+          ],
+          "idle": [
+            -1.8000000000000007,
+            1.3000000000000007
+          ]
+        },
+        "lighting_kw_per_level": [
+          2.5295333333333336,
+          2.8875
+        ],
+        "max_lighting_kw_when_off": 0.05,
+        "max_idle_hvac_kw": 0.9026000000000002,
+        "appliance_model": [
+          1.0040407281529393,
+          0.11962032845486505
+        ],
+        "max_appliance_residual_kw": 0.7810570662328965,
+        "co2_max_abs_residual": {
+          "false": 102.15350056558299,
+          "true": 102.1400709127798
+        }
+      },
+      "Z2": {
+        "max_temperature_rate": 0.2699999999999996,
+        "max_occupancy_jump": 4.5,
+        "max_co2_rise_empty": 24.299999999999997,
+        "max_total_power": 8.504999999999999,
+        "max_power_rate": 1.4510999999999998,
+        "control_error_range": {
+          "heating": [
+            -4.600000000000001,
+            0.3999999999999986
+          ],
+          "cooling": [
+            -0.10000000000000142,
+            1.4000000000000021
+          ],
+          "idle": [
+            -1.5,
+            1.2000000000000028
+          ]
+        },
+        "lighting_kw_per_level": [
+          1.006065573770492,
+          1.15605
+        ],
+        "max_lighting_kw_when_off": 0.05,
+        "max_idle_hvac_kw": 0.3713,
+        "appliance_model": [
+          0.4005443578392946,
+          0.14915513424767943
+        ],
+        "max_appliance_residual_kw": 0.35015099210016665,
+        "co2_max_abs_residual": {
+          "false": 94.5410857601077,
+          "true": 111.9574207418739
+        }
+      },
+      "Z3": {
+        "max_temperature_rate": 0.30000000000000004,
+        "max_occupancy_jump": 13.5,
+        "max_co2_rise_empty": 24.0,
+        "max_total_power": 5.688,
+        "max_power_rate": 1.0272000000000001,
+        "control_error_range": {
+          "heating": [
+            -4.699999999999999,
+            0.3000000000000007
+          ],
+          "cooling": [
+            -0.10000000000000142,
+            1.0999999999999979
+          ],
+          "idle": [
+            -1.6000000000000014,
+            1.2999999999999972
+          ]
+        },
+        "lighting_kw_per_level": [
+          0.5601724137931035,
+          0.6407142857142857
+        ],
+        "max_lighting_kw_when_off": 0.05,
+        "max_idle_hvac_kw": 0.26315000000000005,
+        "appliance_model": [
+          0.14993229851885834,
+          0.05016996196186007
+        ],
+        "max_appliance_residual_kw": 0.14721668292191858,
+        "co2_max_abs_residual": {
+          "false": 262.0114456995201,
+          "true": 1404.743258532034
+        }
+      },
+      "Z4": {
+        "max_temperature_rate": 0.3300000000000004,
+        "max_occupancy_jump": 12.0,
+        "max_co2_rise_empty": 23.4,
+        "max_total_power": 18.3015,
+        "max_power_rate": 2.6300999999999997,
+        "control_error_range": {
+          "heating": [
+            -4.100000000000001,
+            0.3000000000000007
+          ],
+          "cooling": [
+            -0.3000000000000007,
+            1.5
+          ],
+          "idle": [
+            -1.3999999999999986,
+            1.3000000000000007
+          ]
+        },
+        "lighting_kw_per_level": [
+          1.4914999999999998,
+          1.7115
+        ],
+        "max_lighting_kw_when_off": 0.05,
+        "max_idle_hvac_kw": 0.68945,
+        "appliance_model": [
+          1.997546087106188,
+          0.08045603076233745
+        ],
+        "max_appliance_residual_kw": 0.8792645266828203,
+        "co2_max_abs_residual": {
+          "false": 194.88288367720847,
+          "true": 162.43570145864524
+        }
+      },
+      "Z5": {
+        "max_temperature_rate": 0.18000000000000044,
+        "max_occupancy_jump": 3.0,
+        "max_co2_rise_empty": 26.099999999999998,
+        "max_total_power": 10.47,
+        "max_power_rate": 0.4139999999999999,
+        "control_error_range": {
+          "cooling": [
+            -0.3000000000000007,
+            1.5
+          ],
+          "idle": [
+            -0.8999999999999986,
+            0.8999999999999986
+          ]
+        },
+        "lighting_kw_per_level": null,
+        "max_lighting_kw_when_off": 0.05,
+        "max_idle_hvac_kw": 0.47105,
+        "appliance_model": [
+          4.498285838293651,
+          0.0
+        ],
+        "max_appliance_residual_kw": 0.9434734127976193,
+        "co2_max_abs_residual": {
+          "false": 87.50985818181817,
+          "true": 90.0317019230769
+        }
+      }
+    },
+    "drift_monitor_false_alarm_rates": {
+      "Z1:control_error_active": 0.0,
+      "Z1:co2_residual": 0.32515337423312884,
+      "Z2:control_error_active": 0.0,
+      "Z2:co2_residual": 0.26380368098159507,
+      "Z3:control_error_active": 0.0,
+      "Z3:co2_residual": 0.38650306748466257,
+      "Z4:control_error_active": 0.0,
+      "Z4:co2_residual": 0.17177914110429449,
+      "Z5:control_error_active": 0.0,
+      "Z5:co2_residual": 0.0
+    },
+    "disabled_drift_monitors": [
+      "Z1:co2_residual",
+      "Z2:co2_residual",
+      "Z3:co2_residual",
+      "Z4:co2_residual"
+    ],
+    "version": "20261030T165511Z"
+  },
+  "optimization": {
+    "setpoint_min_c": 16.0,
+    "setpoint_max_c": 28.0,
+    "comfort_min_c": 20.0,
+    "comfort_max_c": 25.0,
+    "comfort_neutral_c": 1.0,
+    "setback_min_c": 17.0,
+    "setback_max_c": 27.0,
+    "standby_margin_c": 1.5,
+    "thermostat_deadband_c": 0.5,
+    "preconditioning_lead_s": 3600.0,
+    "max_setpoint_step_c": 1.5,
+    "decision_interval_s": 900.0,
+    "energy_weight_per_kwh": 0.15,
+    "carbon_weight_per_kg": 0.1,
+    "comfort_weight": 0.5,
+    "min_setpoint_change_c": 0.25,
+    "min_lighting_change": 0.05
+  },
+  "agent": {
+    "llm_provider": "offline (deterministic rule-based policy)",
+    "llm_model": "claude-opus-5-5",
+    "llm_effort": "high",
+    "llm_max_tokens": 16000,
+    "llm_timeout_s": 120.0,
+    "llm_refusal_fallback": true,
+    "max_iterations": 10,
+    "min_alert_severity": "medium",
+    "incident_cooldown_s": 3600.0,
+    "unconfirmed_recheck_s": 900.0,
+    "max_actions_per_zone_per_hour": 4,
+    "max_data_age_s": 1800.0,
+    "max_isolated_sensors_per_zone": 2
+  },
+  "carbon_profile": "MockCarbonProvider (synthetic)",
+  "simulation": {
+    "interval_seconds": 1,
+    "speed_factor": 300,
+    "simulated_seconds_per_reading": 300
+  },
+  "environment": {
+    "python": "3.13.17",
+    "platform": "Linux-6.18.44-fc-v185-x86_64-with-glibc2.39",
+    "cpu_count": 4,
+    "packages": {
+      "numpy": "2.5.4",
+      "pandas": "3.1.0",
+      "scikit-learn": "1.9.1",
+      "xgboost": "3.4.1",
+      "scipy": "1.18.1",
+      "langgraph": "1.2.18",
+      "confluent-kafka": "2.16.1",
+      "matplotlib": "3.11.2"
+    },
+    "git_commit": "cfab6c450acabc5d56b2dfc61f4654f9617555f1"
+  },
+  "command": "python -m experiments.evaluation --out docs/results/evaluation --optimizer-detectors 20261030T165511Z",
+  "generated_at": "2026-10-30T17:36:37.022210+00:00"
+}

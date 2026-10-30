@@ -1,0 +1,23 @@
+/* Shared dashboard styles (Bootstrap 5 base). */
+body { background: #f4f6f9; }
+.card { border: 0; box-shadow: 0 1px 3px rgba(0, 0, 0, .08); }
+.card-header { background: #fff; font-weight: 600; font-size: .9rem; }
+.chart { width: 100%; height: 340px; }
+.chart-sm { height: 260px; }
+.live-dot { display: inline-block; width: .7rem; height: .7rem; border-radius: 50%; }
+.live-dot.online { background: #20c997; box-shadow: 0 0 0 3px rgba(32, 201, 151, .3); }
+.live-dot.offline { background: #adb5bd; }
+.feed { max-height: 320px; overflow-y: auto; }
+.feed .list-group-item { font-size: .85rem; }
+.flash { animation: flash 1.5s ease-out; }
+@keyframes flash { from { background: #fff3cd; } to { background: transparent; } }
+.sev-critical, .sev-high { color: #dc3545; font-weight: 600; }
+.sev-medium { color: #fd7e14; font-weight: 600; }
+.sev-low { color: #6c757d; }
+.status-executed { color: #198754; font-weight: 600; }
+.status-approved { color: #0d6efd; font-weight: 600; }
+.status-rejected, .status-failed { color: #dc3545; font-weight: 600; }
+.status-proposed { color: #6c757d; }
+code.params { white-space: pre-wrap; word-break: break-word; font-size: .75rem; }
+td { vertical-align: top; }
+@media (max-width: 576px) { .chart { height: 260px; } }

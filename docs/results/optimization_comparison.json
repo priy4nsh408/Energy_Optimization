@@ -1,0 +1,178 @@
+{
+  "winter week": [
+    {
+      "name": "baseline",
+      "start": "2026-01-19T00:00:00+00:00",
+      "days": 7.0,
+      "interval_seconds": 300,
+      "energy_kwh": 2832.2524799999997,
+      "carbon_kg": 841.0215043520018,
+      "peak_power_kw": 37.794000000000004,
+      "energy_by_zone_kwh": {
+        "Z1": 730.886,
+        "Z2": 279.898,
+        "Z3": 110.543,
+        "Z4": 708.61,
+        "Z5": 1002.316
+      },
+      "occupied_readings": 3076,
+      "occupied_in_comfort_band": 2728,
+      "discomfort_degree_hours": 44.19166666666664,
+      "lighting_shortfall_readings": 18,
+      "lighting_shortfall_on_arrival": 1,
+      "server_max_temperature_c": 21.0,
+      "decisions": 0,
+      "commands_applied": 0,
+      "decisions_rejected": 0,
+      "prediction_basis": {},
+      "comfort_compliance_pct": 88.68660598179454
+    },
+    {
+      "name": "optimized (measured basis)",
+      "start": "2026-01-19T00:00:00+00:00",
+      "days": 7.0,
+      "interval_seconds": 300,
+      "energy_kwh": 2622.312719999998,
+      "carbon_kg": 786.7733047430042,
+      "peak_power_kw": 36.36,
+      "energy_by_zone_kwh": {
+        "Z1": 641.394,
+        "Z2": 247.788,
+        "Z3": 103.693,
+        "Z4": 634.554,
+        "Z5": 994.882
+      },
+      "occupied_readings": 3076,
+      "occupied_in_comfort_band": 2864,
+      "discomfort_degree_hours": 15.458333333333332,
+      "lighting_shortfall_readings": 148,
+      "lighting_shortfall_on_arrival": 76,
+      "server_max_temperature_c": 24.0,
+      "decisions": 3468,
+      "commands_applied": 3468,
+      "decisions_rejected": 0,
+      "prediction_basis": {
+        "measured": 3468
+      },
+      "comfort_compliance_pct": 93.10793237971392
+    },
+    {
+      "name": "optimized (ML basis, 20261030T072815Z)",
+      "start": "2026-01-19T00:00:00+00:00",
+      "days": 7.0,
+      "interval_seconds": 300,
+      "energy_kwh": 2622.312719999998,
+      "carbon_kg": 786.7733047430042,
+      "peak_power_kw": 36.36,
+      "energy_by_zone_kwh": {
+        "Z1": 641.394,
+        "Z2": 247.788,
+        "Z3": 103.693,
+        "Z4": 634.554,
+        "Z5": 994.882
+      },
+      "occupied_readings": 3076,
+      "occupied_in_comfort_band": 2864,
+      "discomfort_degree_hours": 15.458333333333332,
+      "lighting_shortfall_readings": 148,
+      "lighting_shortfall_on_arrival": 76,
+      "server_max_temperature_c": 24.0,
+      "decisions": 3468,
+      "commands_applied": 3468,
+      "decisions_rejected": 0,
+      "prediction_basis": {
+        "measured": 20,
+        "ml": 3448
+      },
+      "comfort_compliance_pct": 93.10793237971392
+    }
+  ],
+  "summer week": [
+    {
+      "name": "baseline",
+      "start": "2026-07-13T00:00:00+00:00",
+      "days": 7.0,
+      "interval_seconds": 300,
+      "energy_kwh": 3987.990580000003,
+      "carbon_kg": 1148.599324876996,
+      "peak_power_kw": 51.192,
+      "energy_by_zone_kwh": {
+        "Z1": 1128.78,
+        "Z2": 431.736,
+        "Z3": 160.998,
+        "Z4": 1214.196,
+        "Z5": 1052.281
+      },
+      "occupied_readings": 3072,
+      "occupied_in_comfort_band": 2634,
+      "discomfort_degree_hours": 29.316666666666706,
+      "lighting_shortfall_readings": 1,
+      "lighting_shortfall_on_arrival": 1,
+      "server_max_temperature_c": 21.0,
+      "decisions": 0,
+      "commands_applied": 0,
+      "decisions_rejected": 0,
+      "prediction_basis": {},
+      "comfort_compliance_pct": 85.7421875
+    },
+    {
+      "name": "optimized (measured basis)",
+      "start": "2026-07-13T00:00:00+00:00",
+      "days": 7.0,
+      "interval_seconds": 300,
+      "energy_kwh": 3487.5023300000003,
+      "carbon_kg": 1009.1139965199933,
+      "peak_power_kw": 45.123,
+      "energy_by_zone_kwh": {
+        "Z1": 894.133,
+        "Z2": 345.69,
+        "Z3": 140.486,
+        "Z4": 1062.347,
+        "Z5": 1044.847
+      },
+      "occupied_readings": 3072,
+      "occupied_in_comfort_band": 2940,
+      "discomfort_degree_hours": 10.141666666666664,
+      "lighting_shortfall_readings": 85,
+      "lighting_shortfall_on_arrival": 38,
+      "server_max_temperature_c": 24.0,
+      "decisions": 3466,
+      "commands_applied": 3466,
+      "decisions_rejected": 0,
+      "prediction_basis": {
+        "measured": 3466
+      },
+      "comfort_compliance_pct": 95.703125
+    },
+    {
+      "name": "optimized (ML basis, 20261030T072815Z)",
+      "start": "2026-07-13T00:00:00+00:00",
+      "days": 7.0,
+      "interval_seconds": 300,
+      "energy_kwh": 3487.2678700000006,
+      "carbon_kg": 1009.0369782769934,
+      "peak_power_kw": 45.123,
+      "energy_by_zone_kwh": {
+        "Z1": 894.133,
+        "Z2": 345.461,
+        "Z3": 140.48,
+        "Z4": 1062.347,
+        "Z5": 1044.847
+      },
+      "occupied_readings": 3072,
+      "occupied_in_comfort_band": 2940,
+      "discomfort_degree_hours": 10.141666666666664,
+      "lighting_shortfall_readings": 85,
+      "lighting_shortfall_on_arrival": 38,
+      "server_max_temperature_c": 24.0,
+      "decisions": 3466,
+      "commands_applied": 3466,
+      "decisions_rejected": 0,
+      "prediction_basis": {
+        "measured": 20,
+        "ml": 3446
+      },
+      "comfort_compliance_pct": 95.703125
+    }
+  ]
+}

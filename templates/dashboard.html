@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">{% endblock %}
+{% block content %}
+<div class="row g-3 mb-3" id="kpis">
+  <div class="col-6 col-lg-3"><div class="card kpi"><div class="card-body">
+    <div class="kpi-label">Building power</div><div class="kpi-value" id="kpi-power">—</div>
+    <div class="kpi-sub" id="kpi-power-sub">latest reading</div></div></div></div>
+  <div class="col-6 col-lg-3"><div class="card kpi"><div class="card-body">
+    <div class="kpi-label">Energy (last 24 h sim.)</div><div class="kpi-value" id="kpi-energy">—</div>
+    <div class="kpi-sub" id="kpi-energy-sub">—</div></div></div></div>
+  <div class="col-6 col-lg-3"><div class="card kpi"><div class="card-body">
+    <div class="kpi-label">Carbon (last 24 h sim.)</div><div class="kpi-value" id="kpi-carbon">—</div>
+    <div class="kpi-sub" id="kpi-carbon-sub">—</div></div></div></div>
+  <div class="col-6 col-lg-3"><div class="card kpi"><div class="card-body">
+    <div class="kpi-label">Open alerts</div><div class="kpi-value" id="kpi-alerts">—</div>
+    <div class="kpi-sub" id="kpi-alerts-sub">—</div></div></div></div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-12 col-xl-8">
+    <div class="card h-100"><div class="card-header"><i class="bi bi-thermometer-half"></i> Live sensor readings</div>
+      <div class="card-body"><div class="row g-2" id="zone-cards"><p class="text-muted">Loading…</p></div></div></div>
+  </div>
+  <div class="col-12 col-xl-4">{% include "_controls.html" %}</div>
+</div>
+
+<div class="row g-3">
+  <div class="col-12 col-xl-8">
+    <div class="card"><div class="card-header"><i class="bi bi-graph-up"></i> Power per zone (live, last 6 h of simulated time)</div>
+      <div class="card-body"><div id="chart-power" class="chart"></div></div></div>
+  </div>
+  <div class="col-12 col-xl-4">
+    <div class="card mb-3"><div class="card-header d-flex justify-content-between">
+      <span><i class="bi bi-exclamation-triangle"></i> Latest alerts</span>
+      <a href="{{ url_for('pages.security') }}" class="small">all</a></div>
+      <ul class="list-group list-group-flush feed" id="alert-feed"><li class="list-group-item text-muted">No alerts yet</li></ul></div>
+    <div class="card"><div class="card-header d-flex justify-content-between">
+      <span><i class="bi bi-robot"></i> Latest agent decision</span>
+      <a href="{{ url_for('pages.agent') }}" class="small">all</a></div>
+      <div class="card-body small" id="latest-decision"><span class="text-muted">No decisions yet</span></div></div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>{% endblock %}
