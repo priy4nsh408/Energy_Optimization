@@ -29,6 +29,7 @@ REQUIRED_PACKAGES = {
     "pandas": "pandas",
     "sklearn": "scikit-learn",
     "xgboost": "xgboost",
+    "scipy": "scipy",
 }
 
 

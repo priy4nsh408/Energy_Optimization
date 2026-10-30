@@ -9,7 +9,7 @@ import pytest
 # Prefixes of every environment variable read by config.py.
 _CONFIG_PREFIXES = ("APP_", "SECRET_KEY", "FLASK_", "SOCKETIO_", "KAFKA_", "POSTGRES_", "LOG_",
                     "SIM_", "BUILDING_", "WEATHER_", "CARBON_", "OPEN_METEO_",
-                    "ELECTRICITY_MAPS_", "EXTERNAL_DATA_", "HTTP_")
+                    "ELECTRICITY_MAPS_", "EXTERNAL_DATA_", "HTTP_", "OPT_")
 
 
 @pytest.fixture

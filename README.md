@@ -16,7 +16,8 @@ simulator ──► [sensor_publisher] ─────────────�
 Open-Meteo, Electricity Maps ──► [external_data_publisher] ──► weather_data, carbon_intensity
                                                                          └─► [record_persistence] ──► PostgreSQL
 building_sensor_data ──► [prediction_service] ──► energy_predictions ──► [record_persistence]
-planned: optimizer, security_worker ──► security_alerts ──► agent (LangGraph)
+sensor data + energy_predictions + carbon ──► [optimization_service] ──► optimization_commands ──► [record_persistence]
+planned: security_worker ──► security_alerts ──► agent (LangGraph)
          ──► agent_actions ──► safety layer ──► optimization_commands ──► simulator
          Flask + Socket.IO dashboard ◄── dashboard bridge (Kafka → Socket.IO) + PostgreSQL history
 ```
@@ -44,11 +45,11 @@ Design rules:
 | `data_sources/` | Weather (Open-Meteo) and carbon-intensity (Electricity Maps, UK grid) providers, cached HTTP client, mock providers |
 | `ml/` | Energy prediction: dataset loading, leakage-safe features, models, training, evaluation, model registry, inference |
 | `docs/results/` | Generated evaluation reports (from real training runs) |
-| `optimization/` | HVAC and lighting optimisation under comfort constraints |
+| `optimization/` | Deterministic SciPy HVAC/lighting optimizer, energy model, lighting rules, constraints/validator |
 | `security/` | Anomaly, attack and drift detection, alert management |
 | `agent/` | Agentic AI (LangGraph) and safety validation |
 | `routes/`, `templates/`, `static/` | Dashboard |
-| `experiments/` | Baseline / optimised / attack comparison experiments |
+| `experiments/` | Closed-loop baseline vs. optimized comparison (attack experiments later) |
 | `docker/` | Kafka and PostgreSQL containers |
 | `tests/` | Unit tests (pytest) |
 
@@ -476,6 +477,69 @@ reproducible within one environment.
   report.
 - The data is synthetic and therefore easier to predict than real measurements.
 
+## HVAC and lighting optimization
+
+`optimization/` is a **deterministic** optimizer (SciPy SLSQP), separate from any LLM. For each zone
+it chooses the HVAC setpoint and the lighting level:
+
+- every 15 simulated minutes,
+- immediately when a zone becomes occupied or empty,
+- and when an occupied zone is too dark.
+
+**Objective** (per zone, per decision interval *H*):
+
+```
+J = H · (w_energy + w_carbon · CI/1000) · P(setpoint, lighting)
+  + H · w_comfort · occupants · (|T − T_preferred| − 1 °C)₊²
+```
+
+*P* is the predicted average power. It starts from the ML forecast for the current controls
+(`energy_predictions`), or from the measured power when no forecast is available. A steady-state
+heat balance of the zone then estimates how *P* changes for another setpoint or lighting level.
+That balance covers the envelope, ventilation, people, equipment, lighting heat and solar gain.
+The ML model is not used for this "what if": it was trained on baseline control only, so it has
+no reliable cause-and-effect for setpoint changes.
+
+**Constraints:**
+
+| Constraint | Value (configurable, `OPT_*`) |
+|---|---|
+| Absolute setpoint limits | 16–28 °C |
+| Occupied comfort band (room temperature) | 20–25 °C; setpoint kept 0.5 °C (thermostat deadband) inside it |
+| Empty but scheduled / pre-conditioning (1 h) | comfort band ± 1.5 °C |
+| Empty outside the schedule (setback) | 17–27 °C |
+| Equipment room (server) | 18–24 °C, setpoint 1 °C inside (thermostat offset under load) |
+| Setpoint step per decision | ≤ 1.5 °C (moving *into* the comfort band is always allowed) |
+| Season consistency | a heated zone is never set so low that the thermostat would actively cool it (and vice versa) |
+| Lighting when occupied | daylight + artificial ≥ required lux (office/meeting 500, cafeteria 200), controlled to +10 % |
+| Lighting safety | lobby egress lighting ≥ 20 % at all times; otherwise 0–100 % |
+
+**Approval and publishing.** Every decision is re-checked by an independent validator
+(`optimization/constraints.validate_decision`). It is then published to `optimization_commands`
+with status `approved` or `rejected`, together with the forecast basis, the predicted baseline and
+optimized power, the carbon intensity and a reason. `record_persistence` stores the commands in
+`optimization_actions`. *Executing* approved commands in the building is left to the safety layer
+and actuator module.
+
+```powershell
+python -m workers.optimization_service          # needs sensor data; uses predictions/carbon if available
+python -m experiments.comparison --report docs/results/optimization_comparison.md
+python -m experiments.baseline_experiment --start 2026-01-19 --days 7 --seed 101
+python -m experiments.optimized_experiment --start 2026-01-19 --days 7 --seed 101 --ml
+```
+
+### Baseline vs. optimized
+
+`experiments.comparison` runs closed-loop simulations of one winter and one summer week. Baseline and
+optimized runs use the same seed, so occupancy and weather are identical in both. Approved
+decisions are applied to the simulator in-process. Carbon uses the *synthetic* mock intensity
+profile.
+
+The controller was developed on a different week (2026-01-12, seed 11). The reported weeks were not
+used for development.
+
+The results table is generated into `docs/results/optimization_comparison.md` by the command above.
+
 ## Verify the environment
 
 ```powershell
@@ -496,8 +560,8 @@ python app.py                                         # then open http://127.0.0
 | 4 | Data processing and PostgreSQL persistence | ✅ Done |
 | 5 | Weather and carbon-intensity data | ✅ Done |
 | 6 | Energy prediction (XGBoost) | ✅ Done |
-| 7 | HVAC/lighting optimisation (SciPy) | ⏳ Next |
-| 8 | Cyberattack simulation | Planned |
+| 7 | HVAC/lighting optimisation (SciPy) | ✅ Done |
+| 8 | Cyberattack simulation | ⏳ Next |
 | 9 | Anomaly and drift detection | Planned |
 | 10 | Safety layer and action execution | Planned |
 | 11 | Agentic AI (LangGraph) | Planned |

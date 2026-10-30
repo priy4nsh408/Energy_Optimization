@@ -469,6 +469,60 @@ class ExternalDataSettings:
         )
 
 
+@dataclass(frozen=True)
+class OptimizationSettings:
+    """Limits and objective weights of the deterministic HVAC/lighting optimizer."""
+
+    setpoint_min_c: float = 16.0           # absolute safety limits for any setpoint
+    setpoint_max_c: float = 28.0
+    comfort_min_c: float = 20.0            # occupied comfort band
+    comfort_max_c: float = 25.0
+    comfort_neutral_c: float = 1.0         # no comfort penalty within +/- this of the preferred setpoint
+    setback_min_c: float = 17.0            # unoccupied band
+    setback_max_c: float = 27.0
+    standby_margin_c: float = 1.5          # empty but scheduled: comfort band widened by this
+    thermostat_deadband_c: float = 0.5     # temperature swings +/- this around the setpoint
+    preconditioning_lead_s: float = 3600.0 # treat as scheduled this long before opening
+    max_setpoint_step_c: float = 1.5       # largest change per decision (comfort recovery excepted)
+    decision_interval_s: float = 900.0     # simulated seconds between decisions per zone
+    energy_weight_per_kwh: float = 0.15
+    carbon_weight_per_kg: float = 0.10
+    comfort_weight: float = 0.5            # per occupant per K^2 per hour outside the neutral zone
+    min_setpoint_change_c: float = 0.25    # smaller changes are not published
+    min_lighting_change: float = 0.05
+
+    def __post_init__(self) -> None:
+        if not self.setpoint_min_c <= self.setback_min_c <= self.comfort_min_c \
+                < self.comfort_max_c <= self.setback_max_c <= self.setpoint_max_c:
+            raise ConfigurationError(
+                "Optimization limits must satisfy setpoint_min <= setback_min <= comfort_min < "
+                "comfort_max <= setback_max <= setpoint_max.")
+        if self.max_setpoint_step_c <= 0 or self.decision_interval_s <= 0:
+            raise ConfigurationError("OPT_MAX_SETPOINT_STEP_C and OPT_DECISION_INTERVAL_S must be > 0.")
+        if min(self.energy_weight_per_kwh, self.carbon_weight_per_kg, self.comfort_weight) < 0:
+            raise ConfigurationError("Optimization weights must be >= 0.")
+
+    @classmethod
+    def from_env(cls) -> "OptimizationSettings":
+        return cls(
+            setpoint_min_c=_get_float("OPT_SETPOINT_MIN_C", 16.0, minimum=5, maximum=40),
+            setpoint_max_c=_get_float("OPT_SETPOINT_MAX_C", 28.0, minimum=5, maximum=40),
+            comfort_min_c=_get_float("OPT_COMFORT_MIN_C", 20.0, minimum=5, maximum=40),
+            comfort_max_c=_get_float("OPT_COMFORT_MAX_C", 25.0, minimum=5, maximum=40),
+            comfort_neutral_c=_get_float("OPT_COMFORT_NEUTRAL_C", 1.0, minimum=0, maximum=5),
+            setback_min_c=_get_float("OPT_SETBACK_MIN_C", 17.0, minimum=5, maximum=40),
+            setback_max_c=_get_float("OPT_SETBACK_MAX_C", 27.0, minimum=5, maximum=40),
+            standby_margin_c=_get_float("OPT_STANDBY_MARGIN_C", 1.5, minimum=0, maximum=10),
+            thermostat_deadband_c=_get_float("OPT_THERMOSTAT_DEADBAND_C", 0.5, minimum=0, maximum=3),
+            preconditioning_lead_s=_get_float("OPT_PRECONDITIONING_LEAD_S", 3600.0, minimum=0),
+            max_setpoint_step_c=_get_float("OPT_MAX_SETPOINT_STEP_C", 1.5, minimum=0.1, maximum=10),
+            decision_interval_s=_get_float("OPT_DECISION_INTERVAL_S", 900.0, minimum=1),
+            energy_weight_per_kwh=_get_float("OPT_ENERGY_WEIGHT_PER_KWH", 0.15, minimum=0),
+            carbon_weight_per_kg=_get_float("OPT_CARBON_WEIGHT_PER_KG", 0.10, minimum=0),
+            comfort_weight=_get_float("OPT_COMFORT_WEIGHT", 0.5, minimum=0),
+        )
+
+
 # --------------------------------------------------------------------------- #
 # Environment-specific configuration classes
 # --------------------------------------------------------------------------- #
@@ -512,6 +566,7 @@ class BaseConfig:
         self.DATABASE = DatabaseSettings.from_env(name_suffix=self.DATABASE_NAME_SUFFIX)
         self.SIMULATOR = SimulatorSettings.from_env()
         self.EXTERNAL_DATA = ExternalDataSettings.from_env()
+        self.OPTIMIZATION = OptimizationSettings.from_env()
         self.LOGGING = LoggingSettings.from_env(
             default_level=self.DEFAULT_LOG_LEVEL,
             default_file_enabled=self.DEFAULT_LOG_TO_FILE,
