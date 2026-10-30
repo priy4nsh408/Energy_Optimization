@@ -1,0 +1,20 @@
+# Smart Building Energy Optimization - Python dependencies
+# Supported: Python 3.10 - 3.13 (3.12 recommended), Windows / Linux / macOS.
+# Dependencies are added module by module as features are implemented.
+
+# --- Configuration ---------------------------------------------------------
+python-dotenv>=1.0,<2
+
+# --- Web dashboard -----------------------------------------------------------
+Flask>=3.0,<4
+Flask-SocketIO>=5.3,<6
+
+# --- Streaming (confluent-kafka ships prebuilt Windows wheels) ---------------
+confluent-kafka>=2.6,<3
+
+# --- Database (psycopg 3 with bundled libpq; no PostgreSQL client install needed)
+psycopg[binary]>=3.2,<4
+psycopg-pool>=3.2,<4
+
+# --- Testing -------------------------------------------------------------------
+pytest>=8.0,<9
