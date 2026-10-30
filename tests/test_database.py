@@ -11,7 +11,7 @@ import psycopg
 import pytest
 
 from config import SimulatorSettings
-from database.db import Database, DatabaseUnavailableError
+from database.db import SCHEMA_VERSION, Database, DatabaseUnavailableError
 from database.models import (
     CarbonIntensityRecord,
     InvalidEventRecord,
@@ -51,10 +51,14 @@ def count(db, table, where="TRUE"):
 
 def test_schema_is_idempotent_and_versioned(db):
     db.apply_schema()
-    assert db.schema_version() == 2
+    assert db.schema_version() == SCHEMA_VERSION == 3
     db.require_schema()
     with db.transaction() as conn:
         assert set(fetch_zones(conn)) == {"Z1", "Z2", "Z3", "Z4", "Z5"}
+        # v3: agent sensor isolation is a valid action type
+        check = conn.execute("SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                             "WHERE conname = 'optimization_actions_action_type_check'").fetchone()[0]
+        assert "isolate_sensor" in check and "restore_sensor" in check
 
 
 def test_sensor_insert_is_idempotent(db):

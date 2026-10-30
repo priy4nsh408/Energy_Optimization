@@ -17,8 +17,8 @@ Open-Meteo, Electricity Maps ──► [external_data_publisher] ──► weath
                                                                          └─► [record_persistence] ──► PostgreSQL
 building_sensor_data ──► [prediction_service] ──► energy_predictions ──► [record_persistence]
 sensor data + energy_predictions + carbon ──► [optimization_service] ──► optimization_commands ──► [record_persistence]
-building_sensor_data ──► [security_service] ──► security_alerts ──► [record_persistence] ──► security_alerts ──► agent (LangGraph)
-         ──► agent_actions ──► safety layer ──► optimization_commands ──► simulator
+building_sensor_data ──► [security_service] ──► security_alerts ──► [agent_service: LangGraph agent ─► safety validator]
+         ──► optimization_commands (approved) ──► [sensor_publisher --apply-commands] ──► simulator ──► agent_actions
          Flask + Socket.IO dashboard ◄── dashboard bridge (Kafka → Socket.IO) + PostgreSQL history
 ```
 
@@ -47,7 +47,7 @@ Design rules:
 | `docs/results/` | Generated evaluation reports (from real training runs) |
 | `optimization/` | Deterministic SciPy HVAC/lighting optimizer, energy model, lighting rules, constraints/validator |
 | `security/` | Rule-based validation, Isolation Forest, KS/PSI drift detection, attack classification, alerts, training |
-| `agent/` | Agentic AI (LangGraph) and safety validation |
+| `agent/` | Agentic AI: LangGraph incident agent, tools, LLM providers, deterministic safety validator, simulated execution, decision records |
 | `routes/`, `templates/`, `static/` | Dashboard |
 | `experiments/` | Closed-loop baseline vs. optimized comparison; labelled cyberattack evaluation |
 | `docker/` | Kafka and PostgreSQL containers |
@@ -340,7 +340,7 @@ Later modules must publish messages in this form. Fields marked ? are optional.
 | `weather_data` | `event_id` (UUID), `building_id`, `observed_at` (ISO, with offset), `source`, `is_forecast`?, `temperature_c`, `humidity_pct`?, `wind_speed_ms`?, `solar_irradiance_w_m2`?, `cloud_cover_pct`? |
 | `carbon_intensity` | `event_id`, `region`, `observed_at`, `source`, `is_forecast`?, `intensity_g_per_kwh` |
 | `security_alerts` | `alert_id`, `zone_id`?, `source_event_id`?, `detected_at`, `alert_type` (anomaly/attack/drift/validation), `severity` (low/medium/high/critical), `detector`, `score`?, `description`, `details`?, `status`?, `resolved_at`? |
-| `optimization_commands`, `agent_actions` | `action_id`, `zone_id`, `created_at`, `updated_at`?, `source` (optimizer/agent/operator/baseline), `action_type` (set_setpoint/set_hvac_mode/set_lighting/clear_overrides), `parameters` (object), `status`, `reason`?, `safety_reason`?, `related_alert_id`? |
+| `optimization_commands`, `agent_actions` | `action_id`, `zone_id`, `created_at`, `updated_at`?, `source` (optimizer/agent/operator/baseline), `action_type` (set_setpoint/set_hvac_mode/set_lighting/clear_overrides/isolate_sensor/restore_sensor), `parameters` (object), `status`, `reason`?, `safety_reason`?, `related_alert_id`? |
 
 ## Weather and carbon-intensity data
 
@@ -764,6 +764,152 @@ What the test showed:
 - *Disclosure:* one development diagnostic also printed CUSUM values for the test period. This is
   stated in the report.
 
+## Agentic AI (LangGraph) with a deterministic safety layer
+
+The `agent/` package investigates security alerts, explains them and proposes corrective actions.
+**The agent never controls physical equipment.** Every proposal is checked by a deterministic safety
+validator. Only approved actions are executed, and only on the building *simulator*.
+
+```
+START ─► context ─► agent ⇄ tools ─► finalize ─► safety_gate ─► execute ─► record ─► END
+```
+
+| Node | What it does |
+|---|---|
+| `context` | Builds the input: the alert plus a building snapshot (latest readings with isolated sensors masked, current isolations, alerts of the last 6 h). |
+| `agent` | One LLM turn. If the LLM fails (network, credentials, refusal, truncation), the incident continues with the offline policy and the error is recorded. |
+| `tools` | Runs the tools the LLM asked for. Results go back to the LLM as JSON `tool_result` blocks. |
+| `finalize` | Makes sure an assessment exists; if not, records "operator review required". |
+| `safety_gate` | Re-validates every queued proposal against the *latest* state. The LLM has no say here. |
+| `execute` | Runs approved actions only: in-process on the simulator, or through Kafka to the simulator process. |
+| `record` | Writes the decision and every action outcome (see "Records" below). |
+
+**Tools** (`agent/tools.py`):
+
+| Tool | Kind | Purpose |
+|---|---|---|
+| `get_sensor_data` | read | Latest reading (isolated sensors shown as `null`), window statistics, temperature trend, the other zones' temperatures |
+| `get_energy_data` | read | Zone energy (total/HVAC/lighting/appliances), mean and peak power, same hours yesterday, building total, estimated CO₂e |
+| `get_weather_and_carbon` | read | Latest weather and grid carbon intensity, with their source |
+| `run_anomaly_detection` | read | Re-runs the Module 8 rules and Isolation Forest on recent readings (with 26 h of history first) |
+| `run_drift_analysis` | read | Re-runs the KS + PSI security-drift and data-drift detectors on the last 24 h |
+| `run_energy_optimization` | read | Module 7 SciPy optimizer for the current conditions (recommendation only) |
+| `adjust_hvac` | proposal | Setpoint, HVAC mode, or `clear_overrides` (back to the baseline schedule) |
+| `adjust_lighting` | proposal | Lighting level 0–100 % |
+| `isolate_sensor` | proposal | Software quarantine of a compromised sensor; needs an alert id as evidence |
+| `submit_assessment` | final | Diagnosis, likely cause, confidence, energy impact, operational impact, recommendations |
+
+**Safety validator** (`agent/safety.py`). Deterministic: the same proposal in the same state always
+gets the same verdict.
+
+- *Well-formed:* known zone, known action type, only the expected parameters.
+- *Fresh data:* the latest reading is at most `AGENT_MAX_DATA_AGE_S` old.
+- *Module 7 constraints:* absolute setpoint limits, comfort/setback/equipment bands, the step limit,
+  egress lighting, and illuminance in occupied zones.
+- *Conservative assumptions:* if the occupancy sensor is untrusted (isolated or under attack), the
+  zone is treated as occupied.
+- *HVAC off is never allowed* in the server room or in an occupied zone.
+- *Rate limit:* at most `AGENT_MAX_ACTIONS_PER_ZONE_PER_HOUR` actions per zone.
+- *Sensor isolation:* needs an alert for that zone as evidence, and at most
+  `AGENT_MAX_ISOLATED_SENSORS_PER_ZONE` sensors per zone.
+- *Restoring a sensor:* only after an hour with no alerts.
+- *Always allowed:* returning a zone to its baseline schedule, because that is the safe fallback.
+
+**Sensor isolation** (`agent/isolation.py`) is a software quarantine only: no equipment is touched.
+The isolated sensor's readings are masked in the agent's tools, the validator assumes the worst case,
+and the optimizer pauses that zone, which then runs on its baseline schedule.
+
+**Incident dispatch** (`agent/dispatch.py`):
+
+- Alerts below `AGENT_MIN_ALERT_SEVERITY` are not investigated. The default is `medium`, so
+  data-drift alerts (`low`) are only recorded.
+- The same zone and classification are investigated at most once per `AGENT_INCIDENT_COOLDOWN_S`.
+- An investigation that took no action is re-checked after `AGENT_UNCONFIRMED_RECHECK_S`.
+- A *contained* incident (its isolations are still in place) is not re-investigated.
+
+**LLM providers** (`agent/llm.py`, selected with `AGENT_LLM_PROVIDER`):
+
+- `anthropic`: Claude through the official Anthropic SDK.
+  - Default model `claude-opus-5-5`, with adaptive thinking and effort set by `AGENT_LLM_EFFORT`.
+  - The system prompt and tools are cached with prompt caching.
+  - The thinking blocks are passed back unchanged (append-only history).
+  - The server-side refusal fallback (`fallbacks: "default"`) is on by default. Turn it off with
+    `AGENT_LLM_REFUSAL_FALLBACK=false`.
+  - The key comes from `ANTHROPIC_API_KEY` and is never logged.
+- `offline`: **not an LLM.** A deterministic, rule-based playbook that drives the same tools, so the
+  whole pipeline runs and is tested without an API key.
+  - It acts only when re-running the detectors confirms the alert: at least two readings re-flagged
+    with the same classification, or one of them corroborated by three or more flagged readings in
+    total.
+  - Every record says `offline`.
+- `auto` (default): `anthropic` if `ANTHROPIC_API_KEY` is set, otherwise `offline`.
+
+**Records** (requirement: "record decisions and results"):
+
+- `agent_decisions` table (schema v3) and a JSON Lines audit log (`AGENT_AUDIT_LOG`): provider,
+  model, diagnosis, cause, confidence, impacts, recommendations, every tool call, every action with
+  its safety verdict and result, and errors.
+- Actions in `optimization_actions` and on the `agent_actions` topic, with status
+  `proposed → approved/rejected → executed/failed`.
+
+### Run it
+
+Closed-loop demo in one process (simulator → attacks → detectors → agent → safety → simulator), with no Kafka needed:
+
+```powershell
+python -m agent.demo --report docs/results/agent_demo.md                     # offline policy unless a key is set
+$env:ANTHROPIC_API_KEY="..."; python -m agent.demo --provider anthropic      # with Claude
+```
+
+As Kafka services (after `python -m database init`, which upgrades the schema to v3):
+
+```powershell
+python -m workers.security_service
+python -m workers.agent_service                      # alerts -> agent -> approved commands
+python -m workers.sensor_publisher --apply-commands  # simulator executes approved agent commands
+python -m workers.record_persistence                 # stores commands and outcomes
+```
+
+### Demo results (offline policy, measured)
+
+These results come from `docs/results/agent_demo.md`. **No LLM was called**: the decisions come from
+the rule-based playbook. No Claude run was possible here because no API key was available.
+
+The setup:
+
+- 48 simulated hours from 9 February; the first 24 h are a monitoring warm-up.
+- Four attacks on day 1: temperature spoofing in Z1, hidden occupancy in Z3, abnormal power in Z4
+  and a replay in Z2.
+
+What happened:
+
+- *Alerts:* 84 were raised and 17 investigated. The rest were not investigated because of the
+  warm-up, low severity, or because the incident was already contained.
+- *Containment:* all 4 attacks were contained 15–30 minutes after they started. The agent isolated
+  the attacked sensor and returned the zone to its baseline schedule.
+- *No over-reaction:* no sensor was isolated in a zone without an attack. 8 investigations ended as
+  "not confirmed on re-analysis — no action".
+- *One wrong-sensor isolation:* the hidden-occupancy attack first showed up as `abnormal_power`
+  alerts (an appliance/occupancy mismatch), so Z3's power meter was isolated before the occupancy
+  sensor. This misclassification is inherited from the Module 8 detectors.
+- *Follow-up drift alerts:* after the spoofing and the replay ended, drift alerts followed. They led
+  only to a harmless return to the baseline schedule. The duplicate isolations were rejected by the
+  validator.
+
+**Finding: the detectors and the optimizer interact.** With `--optimizer`
+(`docs/results/agent_demo_with_optimizer.md`), alerts rose from 84 to 256.
+
+- The Module 8 HVAC-contradiction rule was learned from baseline-controlled data, so the optimizer's
+  setbacks look like temperature spoofing to it.
+- As a result, the playbook isolated the temperature sensors of 4 zones that were *not* attacked.
+- The safety cap (at most 2 isolated sensors per zone) also blocked one correct isolation, in Z3.
+- *Fix idea (not yet implemented):* train the detectors on data recorded while the optimizer is
+  in control.
+
+The Claude path is covered by unit tests with a mocked client (request shape, parsing, refusal and
+truncation handling, fallback to the offline policy). It has not been run against the live API in
+this environment.
+
 ## Verify the environment
 
 ```powershell
@@ -789,10 +935,8 @@ See `docs/PROGRESS.md` for the handoff notes: current state, how to resume, rege
 | 6 | Energy prediction (XGBoost) | ✅ Done |
 | 7 | HVAC/lighting optimisation (SciPy) | ✅ Done |
 | 8 | Cyberattack simulation, anomaly and drift detection | ✅ Done |
-| 9 | Safety layer and action execution | ⏳ Next |
-| 10 | Agentic AI (LangGraph) | Planned |
-| 11 | Real-time dashboard | Planned |
-| 12 | Experiments and evaluation | Planned |
+| 9 | Agentic AI (LangGraph), safety layer and simulated action execution | ✅ Done |
+| 10 | Real-time dashboard | ⏳ Next |
+| 11 | Experiments and evaluation | Planned |
 
-No experimental results are reported yet. Results will be added only after real
-experiment runs.
+Measured results are in `docs/results/` (generated by the commands shown in each section).

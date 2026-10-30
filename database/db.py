@@ -31,7 +31,7 @@ from config import DatabaseSettings
 logger = logging.getLogger(__name__)
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class DatabaseUnavailableError(RuntimeError):

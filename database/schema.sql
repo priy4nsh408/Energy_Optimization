@@ -249,3 +249,38 @@ FROM energy_predictions p
 JOIN sensor_readings s ON s.zone_id = p.zone_id AND s.event_time = p.predicted_for;
 
 INSERT INTO schema_version (version) VALUES (2) ON CONFLICT DO NOTHING;
+
+-- ==========================================================================
+-- Version 3: agentic AI (agent.graph, workers.agent_service)
+-- ==========================================================================
+-- Agent actions add sensor isolation (a software quarantine of a sensor's
+-- readings; no equipment is touched).
+ALTER TABLE optimization_actions DROP CONSTRAINT IF EXISTS optimization_actions_action_type_check;
+ALTER TABLE optimization_actions ADD CONSTRAINT optimization_actions_action_type_check CHECK (action_type IN
+    ('set_setpoint', 'set_hvac_mode', 'set_lighting', 'clear_overrides', 'isolate_sensor', 'restore_sensor'));
+
+-- One row per agent run (incident): diagnosis, impact, recommendations, the
+-- tools it called and the outcome of every proposed action.
+CREATE TABLE IF NOT EXISTS agent_decisions (
+    decision_id         UUID PRIMARY KEY,
+    alert_id            UUID,                       -- triggering alert (NULL = manual request)
+    zone_id             TEXT,
+    started_at          TIMESTAMPTZ NOT NULL,
+    finished_at         TIMESTAMPTZ NOT NULL,
+    llm_provider        TEXT NOT NULL,              -- anthropic | offline
+    llm_model           TEXT NOT NULL,
+    diagnosis           TEXT NOT NULL,
+    likely_cause        TEXT NOT NULL,
+    confidence          TEXT NOT NULL CHECK (confidence IN ('low', 'medium', 'high')),
+    energy_impact       TEXT NOT NULL,
+    operational_impact  TEXT NOT NULL,
+    recommendations     JSONB NOT NULL DEFAULT '[]'::jsonb,
+    tool_calls          JSONB NOT NULL DEFAULT '[]'::jsonb,
+    actions             JSONB NOT NULL DEFAULT '[]'::jsonb,
+    outcome             TEXT NOT NULL,              -- e.g. "2 executed, 1 rejected"
+    errors              JSONB NOT NULL DEFAULT '[]'::jsonb
+);
+CREATE INDEX IF NOT EXISTS ix_agent_decisions_time ON agent_decisions (started_at DESC);
+CREATE INDEX IF NOT EXISTS ix_agent_decisions_alert ON agent_decisions (alert_id);
+
+INSERT INTO schema_version (version) VALUES (3) ON CONFLICT DO NOTHING;

@@ -38,7 +38,8 @@ ALERT_TYPES = {"anomaly", "attack", "drift", "validation"}
 SEVERITIES = {"low", "medium", "high", "critical"}
 ALERT_STATUSES = {"open", "acknowledged", "resolved"}
 ACTION_SOURCES = {"optimizer", "agent", "operator", "baseline"}
-ACTION_TYPES = {"set_setpoint", "set_hvac_mode", "set_lighting", "clear_overrides"}
+ACTION_TYPES = {"set_setpoint", "set_hvac_mode", "set_lighting", "clear_overrides", "isolate_sensor",
+                "restore_sensor"}
 ACTION_STATUSES = {"proposed", "approved", "rejected", "executed", "failed"}
 POWER_SUM_TOLERANCE_KW = 0.01
 POWER_SUM_TOLERANCE_REL = 0.01

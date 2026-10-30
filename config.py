@@ -523,6 +523,77 @@ class OptimizationSettings:
         )
 
 
+@dataclass(frozen=True)
+class AgentSettings:
+    """Agentic AI (LangGraph) incident agent.
+
+    ``llm_provider``:
+      * ``anthropic`` - Claude through the Anthropic API (credentials from the
+        environment, e.g. ``ANTHROPIC_API_KEY``; never logged).
+      * ``offline`` - deterministic rule-based policy, clearly labelled as such
+        in every record. No LLM is called. For development, tests and demos
+        without an API key.
+      * ``auto`` - ``anthropic`` when ``ANTHROPIC_API_KEY`` is set, else ``offline``.
+
+    Whatever the provider, every action goes through the deterministic safety
+    validator and only the *simulated* building is changed.
+    """
+
+    PROVIDERS: ClassVar[tuple[str, ...]] = ("auto", "anthropic", "offline")
+    EFFORTS: ClassVar[tuple[str, ...]] = ("low", "medium", "high", "xhigh", "max")
+    SEVERITIES: ClassVar[tuple[str, ...]] = ("low", "medium", "high", "critical")
+
+    llm_provider: str = "auto"
+    llm_model: str = "claude-opus-5-5"
+    llm_effort: str = "high"
+    llm_max_tokens: int = 16000
+    llm_timeout_s: float = 120.0
+    llm_refusal_fallback: bool = True       # server-side fallback model on a policy refusal
+    max_iterations: int = 10                # LLM turns per incident
+    min_alert_severity: str = "medium"      # alerts below this are recorded but not investigated
+    incident_cooldown_s: float = 3600.0     # same zone + classification handled at most this often
+    unconfirmed_recheck_s: float = 900.0    # ...but re-checked sooner if the last run took no action
+    max_actions_per_zone_per_hour: int = 4
+    max_data_age_s: float = 1800.0          # control actions need a reading at most this old
+    max_isolated_sensors_per_zone: int = 2
+    audit_log: Path = BASE_DIR / "logs" / "agent_decisions.jsonl"
+
+    def __post_init__(self) -> None:
+        if self.llm_provider not in self.PROVIDERS:
+            raise ConfigurationError(f"AGENT_LLM_PROVIDER must be one of {list(self.PROVIDERS)}.")
+        if self.llm_effort not in self.EFFORTS:
+            raise ConfigurationError(f"AGENT_LLM_EFFORT must be one of {list(self.EFFORTS)}.")
+        if self.min_alert_severity not in self.SEVERITIES:
+            raise ConfigurationError(f"AGENT_MIN_ALERT_SEVERITY must be one of {list(self.SEVERITIES)}.")
+
+    @property
+    def resolved_provider(self) -> str:
+        if self.llm_provider != "auto":
+            return self.llm_provider
+        return "anthropic" if os.environ.get("ANTHROPIC_API_KEY") else "offline"
+
+    @classmethod
+    def from_env(cls) -> "AgentSettings":
+        return cls(
+            llm_provider=_get_str("AGENT_LLM_PROVIDER", "auto").lower(),
+            llm_model=_get_str("AGENT_LLM_MODEL", "claude-opus-5-5"),
+            llm_effort=_get_str("AGENT_LLM_EFFORT", "high").lower(),
+            llm_max_tokens=_get_int("AGENT_LLM_MAX_TOKENS", 16000, minimum=1024, maximum=128000),
+            llm_timeout_s=_get_float("AGENT_LLM_TIMEOUT_S", 120.0, minimum=5, maximum=1800),
+            llm_refusal_fallback=_get_bool("AGENT_LLM_REFUSAL_FALLBACK", True),
+            max_iterations=_get_int("AGENT_MAX_ITERATIONS", 10, minimum=2, maximum=50),
+            min_alert_severity=_get_str("AGENT_MIN_ALERT_SEVERITY", "medium").lower(),
+            incident_cooldown_s=_get_float("AGENT_INCIDENT_COOLDOWN_S", 3600.0, minimum=0),
+            unconfirmed_recheck_s=_get_float("AGENT_UNCONFIRMED_RECHECK_S", 900.0, minimum=0),
+            max_actions_per_zone_per_hour=_get_int("AGENT_MAX_ACTIONS_PER_ZONE_PER_HOUR", 4,
+                                                   minimum=1, maximum=100),
+            max_data_age_s=_get_float("AGENT_MAX_DATA_AGE_S", 1800.0, minimum=1),
+            max_isolated_sensors_per_zone=_get_int("AGENT_MAX_ISOLATED_SENSORS_PER_ZONE", 2,
+                                                   minimum=1, maximum=10),
+            audit_log=_resolve_path(_get_str("AGENT_AUDIT_LOG", "logs/agent_decisions.jsonl")),
+        )
+
+
 # --------------------------------------------------------------------------- #
 # Environment-specific configuration classes
 # --------------------------------------------------------------------------- #
@@ -567,6 +638,7 @@ class BaseConfig:
         self.SIMULATOR = SimulatorSettings.from_env()
         self.EXTERNAL_DATA = ExternalDataSettings.from_env()
         self.OPTIMIZATION = OptimizationSettings.from_env()
+        self.AGENT = AgentSettings.from_env()
         self.LOGGING = LoggingSettings.from_env(
             default_level=self.DEFAULT_LOG_LEVEL,
             default_file_enabled=self.DEFAULT_LOG_TO_FILE,
@@ -593,6 +665,8 @@ class BaseConfig:
             "database": self.DATABASE.safe_dsn,
             "weather_provider": self.EXTERNAL_DATA.weather_provider,
             "carbon_provider": self.EXTERNAL_DATA.carbon_provider,
+            "agent_llm": f"{self.AGENT.resolved_provider}"
+                         + (f" ({self.AGENT.llm_model})" if self.AGENT.resolved_provider == "anthropic" else ""),
             "simulator": (f"{self.SIMULATOR.building_id} every {self.SIMULATOR.interval_seconds}s"
                           f" at {self.SIMULATOR.speed_factor}x"),
             "log_level": self.LOGGING.level,

@@ -4,8 +4,8 @@ Status of *Smart Building Energy Optimization Using Real-Time Streaming, Cyberse
 Use this file to continue the work later, alone or in a new Claude session.
 
 - **Branch:** `claude/nifty-brown-uckrlo`
-- **Last completed module:** 8 (cybersecurity and data drift detection)
-- **Tests:** 286 passed, with Docker running and the three datasets in `data/raw/`.
+- **Last completed module:** 9 (agentic AI with LangGraph, safety layer and simulated action execution)
+- **Tests:** 323 passed, with Docker running and the three datasets in `data/raw/`.
 
 ## Module status
 
@@ -19,10 +19,9 @@ Use this file to continue the work later, alone or in a new Claude session.
 | 6 | Energy prediction (ML) | ✅ | `99c5b86` (+ three project datasets, see below) | `ml/`, `python -m ml.train --dataset all`, `workers.prediction_service` |
 | 7 | HVAC/lighting optimization | ✅ | `b89ba36`, `9061984` | `optimization/`, `workers.optimization_service`, `python -m experiments.comparison` |
 | 8 | Cybersecurity + drift detection | ✅ | `741c57c` | `simulator/attack_simulator.py`, `security/`, `python -m security.train`, `workers.security_service`, `python -m experiments.cyberattack_experiment` |
-| 9 | Safety layer and action execution | ⏳ next | | |
-| 10 | Agentic AI (LangGraph) | planned | | |
-| 11 | Real-time dashboard (Flask-SocketIO) | planned | | |
-| 12 | Experiments and evaluation | planned | | |
+| 9 | Agentic AI (LangGraph) + safety layer + simulated execution | ✅ | see git log | `agent/`, `python -m agent.demo`, `workers.agent_service`, `workers.sensor_publisher --apply-commands` |
+| 10 | Real-time dashboard (Flask-SocketIO) | ⏳ next | | |
+| 11 | Experiments and evaluation | planned | | |
 
 Measured results are in `docs/results/` and summarised in `README.md`.
 
@@ -65,7 +64,8 @@ These are git-ignored, either because they are large or because they are generat
 | Project datasets | Copy your three files into `data/raw/` with these exact names: `KAG_energydata_complete.csv` (SHA-256 `2820bf71…a25d`), `test_energy_data.csv` (`01c85f8d…26da`) and `energy_consumption.csv` (`74cfb5a3…9301`). Then run `python -m ml.train --dataset all --report docs/results/energy_prediction_combined.md`. |
 | Building history in PostgreSQL | Run `python -m workers.sensor_persistence` in one terminal, and in another: `python -m workers.sensor_publisher --fast --interval 1 --speed 300 --ticks 8064 --seed 2026 --start 2026-01-05T00:00` |
 | ML models (`ml/artifacts/`) | `python -m ml.train --dataset kag`, then `python -m ml.train --dataset building --start 2026-01-05T00:00+00:00 --end 2026-02-02T00:00+00:00` |
-| Security detectors (`security/artifacts/`) | `python -m security.train` (28 clean simulated days, seed 2026) |
+| Security detectors (`security/artifacts/`) | `python -m security.train` (28 clean simulated days, seed 2026); also needed by `agent.demo` and the agent's anomaly/drift tools |
+| Agent audit log (`logs/agent_decisions.jsonl`) | Created automatically |
 | API cache (`data/cache/`), logs | Created automatically |
 
 ## Key design decisions (keep these when continuing)
@@ -86,7 +86,17 @@ These are git-ignored, either because they are large or because they are generat
 - **ML.** The KAG dataset is the research benchmark. The *deployed* model is trained on the
   building's own Kafka-derived history, because KAG features don't exist in the stream.
 - **Optimizer.** Deterministic SciPy SLSQP, with no LLM involved. It publishes `approved`/`rejected`
-  commands but does **not** execute them; execution is Module 9.
+  commands but does **not** execute them.
+- **Agent (Module 9).** A LangGraph graph: context → LLM ⇄ tools → finalize → safety_gate → execute →
+  record.
+  - Action tools only *propose*. `agent/safety.py` decides deterministically, and the final gate
+    re-validates against the latest state.
+  - Only the simulator is changed: in process (`agent.demo`) or over Kafka
+    (`optimization_commands` → `sensor_publisher --apply-commands` → `agent_actions`).
+  - LLM providers (`AGENT_LLM_PROVIDER`): `anthropic` (Claude, `claude-opus-5-5`) or `offline` (a
+    rule-based playbook, labelled in every record).
+  - If the LLM fails, the incident continues with the offline policy and the error is recorded.
+  - Sensor isolation is a software quarantine.
 - **Security.** Point anomalies (one reading) are kept separate from drift (a window).
   *Security drift* is distinct from *data drift*. Thresholds are calibrated only on clean data.
 - **Honest evaluation.** Results are never tuned on test data. When a held-out week revealed
@@ -108,21 +118,31 @@ These are git-ignored, either because they are large or because they are generat
 5. **Slow manipulation on real data.** The KS/PSI window drift tests are unusable on KAG
    (false alarms on 49–80 % of clean windows). CUSUM works only for faster ramps: it detected
    0.4 °C/h and missed 0.2 °C/h.
-6. **Windows.** Not yet run on Windows; developed and tested on Linux.
+6. **Agent vs. detectors.** The Module 8 detectors were trained on baseline-controlled data. With
+   the optimizer in the loop, the HVAC-contradiction rule raises false spoofing alerts (84 → 256
+   alerts in the demo), and the offline playbook then isolates sensors in zones that are not under
+   attack.
+   - Fix idea: retrain the detectors on data recorded with the optimizer in control.
+   - Also inherited from Module 8: an occupancy-hiding attack is first classified as
+     `abnormal_power`, so the power meter is isolated before the occupancy sensor.
+7. **Claude not run live.** The Anthropic path is unit-tested with a mocked client only; no API key
+   was available in the development environment. Run `python -m agent.demo --provider anthropic`.
+8. **Windows.** Not yet run on Windows; developed and tested on Linux.
 
-## Next step: Module 9 (safety layer and action execution)
+## Next step: Module 10 (real-time dashboard)
 
 Planned scope, to be confirmed before implementing:
 
-- A deterministic safety validator for *every* proposed action (optimizer, agent, operator):
-  - setpoint and lighting bounds, rate limits and critical-zone rules (server room);
-  - refuse or hold actions for zones with open high-severity security alerts;
-  - stale-data checks.
-- An actuator service that consumes approved commands, applies them to the simulator via
-  `BuildingSimulator.apply_command`, and publishes the outcome (`executed`/`failed`) to
-  `agent_actions`. This needs the simulator to accept commands while running in a Kafka-connected
-  process, for example by combining the sensor publisher and the actuator.
-- Tests, and a closed-loop check: attack → detection → safe corrective action.
+- A Flask + Flask-SocketIO dashboard with Bootstrap and Plotly.js.
+- A Kafka → Socket.IO bridge as a separate process. Flask itself never consumes Kafka.
+- What it shows:
+  - live zone readings and energy;
+  - predictions vs. actuals;
+  - optimizer commands;
+  - security alerts;
+  - agent decisions (diagnosis, actions, safety verdicts);
+  - sensor isolations.
+- History is read from PostgreSQL.
 
 ## How to continue with Claude
 
@@ -131,4 +151,4 @@ Start a new session on this repository and branch, and paste:
 > Continue the Smart Building Energy Optimization project on branch `claude/nifty-brown-uckrlo`.
 > Read `docs/PROGRESS.md` and `README.md` first, then inspect the repository. Follow the same
 > working method as before: one module at a time, tests, honest results, commit and push, then stop
-> for approval. Implement Module 9: Safety Layer and Action Execution.
+> for approval. Implement Module 10: Real-time dashboard.

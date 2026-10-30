@@ -105,6 +105,7 @@ class AlertManager:
                      "(season, weather or usage change); review ML model validity"),
             "details": {
                 "classification": classification, "scope": "distribution_window",
+                "drifting_features": list(result.drifting),
                 "window_start": result.window_start.isoformat(), "window_end": result.window_end.isoformat(),
                 "features": [{"feature": f.feature, "ks_statistic": round(f.ks_statistic, 4),
                               "ks_p_value": f.ks_p_value, "psi": round(f.psi, 4),

@@ -7,6 +7,12 @@ in order.
     python -m workers.sensor_publisher                        # real time
     python -m workers.sensor_publisher --interval 1 --speed 60
     python -m workers.sensor_publisher --fast --ticks 100 --seed 1
+    python -m workers.sensor_publisher --apply-commands   # also execute approved agent commands
+
+With ``--apply-commands`` the publisher also consumes ``optimization_commands``
+and applies *approved* commands from the selected sources (default: the agent,
+whose commands passed the safety validator) to the simulated building between
+readings, reporting ``executed``/``failed`` on ``agent_actions``.
 """
 
 from __future__ import annotations
@@ -23,9 +29,10 @@ from config import ConfigurationError, get_config
 from simulator.__main__ import add_simulation_arguments, build_settings
 from simulator.attack_simulator import AttackInjector, AttackScenario
 from simulator.engine import BuildingSimulator
+from streaming.consumer import JsonConsumer
 from streaming.kafka_config import KafkaUnavailableError, create_admin_client, wait_for_broker
 from streaming.producer import JsonProducer
-from streaming.topics import BUILDING_SENSOR_DATA, ensure_topics
+from streaming.topics import AGENT_ACTIONS, BUILDING_SENSOR_DATA, OPTIMIZATION_COMMANDS, ensure_topics
 from utils.logging_config import configure_logging
 from utils.shutdown import install_shutdown_handlers
 
@@ -43,6 +50,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                              "TYPE:ZONE:START_MIN:DURATION_MIN[:key=value,...]; repeatable")
     parser.add_argument("--labels", type=Path,
                         help="write ground-truth attack labels (JSON Lines) to this file")
+    parser.add_argument("--apply-commands", action="store_true",
+                        help="execute approved commands from optimization_commands in the simulator")
+    parser.add_argument("--command-sources", default="agent",
+                        help="comma-separated sources whose approved commands are executed (default: agent)")
     return parser.parse_args(argv)
 
 
@@ -81,7 +92,22 @@ def main(argv: list[str] | None = None, stop_event: threading.Event | None = Non
         logger.warning("ATTACK SIMULATION ENABLED: published readings will be manipulated",
                        extra={"attacks": args.attack})
 
+    actuator = consumer = consumer_thread = None
+    if args.apply_commands:
+        from agent.executor import SimulatorActuator
+
+        sources = {s.strip() for s in args.command_sources.split(",") if s.strip()}
+        actuator = SimulatorActuator(simulator, producer, AGENT_ACTIONS, sources)
+        consumer = JsonConsumer(config.KAFKA, "sensor_publisher_actuator", [OPTIMIZATION_COMMANDS],
+                                auto_offset_reset="latest")
+        consumer_thread = threading.Thread(target=consumer.run, args=(actuator.handle,),
+                                           kwargs={"stop_event": stop_event}, name="actuator", daemon=True)
+        consumer_thread.start()
+        logger.info("Executing approved commands in the simulator", extra={"sources": sorted(sources)})
+
     def publish(event: dict) -> None:
+        if actuator is not None:
+            actuator.drain()
         if injector is not None:
             event = injector.apply(event)
         producer.send(BUILDING_SENSOR_DATA, event, key=event["zone_id"],
@@ -92,6 +118,11 @@ def main(argv: list[str] | None = None, stop_event: threading.Event | None = Non
     except KeyboardInterrupt:
         logger.info("Interrupted")
     finally:
+        if consumer is not None:
+            stop_event.set()
+            consumer_thread.join(timeout=10)
+            consumer.close()
+            logger.info("Actuator stopped", extra=actuator.stats)
         producer.close(timeout_s=30)
         if injector is not None and args.labels:
             args.labels.parent.mkdir(parents=True, exist_ok=True)

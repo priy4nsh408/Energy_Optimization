@@ -171,3 +171,24 @@ class EnergyPredictionRecord:
     model_name: str
     model_version: str
     created_at: datetime
+
+
+@dataclass(frozen=True)
+class AgentDecisionRecord:
+    decision_id: UUID
+    alert_id: UUID | None
+    zone_id: str | None
+    started_at: datetime
+    finished_at: datetime
+    llm_provider: str
+    llm_model: str
+    diagnosis: str
+    likely_cause: str
+    confidence: str
+    energy_impact: str
+    operational_impact: str
+    recommendations: list[str] = field(default_factory=list)
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    actions: list[dict[str, Any]] = field(default_factory=list)
+    outcome: str = ""
+    errors: list[str] = field(default_factory=list)

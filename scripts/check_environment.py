@@ -30,6 +30,9 @@ REQUIRED_PACKAGES = {
     "sklearn": "scikit-learn",
     "xgboost": "xgboost",
     "scipy": "scipy",
+    "matplotlib": "matplotlib",
+    "langgraph": "langgraph",
+    "anthropic": "anthropic",
 }
 
 
