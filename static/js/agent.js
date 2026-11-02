@@ -182,13 +182,17 @@
   function renderDecisions() {
     const kinds = decisions.map((d) => Verdict.of(d).kind);
     const count = (k) => kinds.filter((x) => k.includes(x)).length;
-    const acts = decisions.flatMap((d) => d.actions || []).map((a) => a.status);
+    const all = decisions.flatMap((d) => d.actions || []);
+    const acts = all.map((a) => a.status);
+    // Actions that went through the approval step (they carry an explanation) and are no longer waiting.
+    const decided = all.filter((a) => (a.explanation || (latest[a.action_id] || {}).parameters?.approval) &&
+                                      a.status !== "awaiting_approval").length;
     document.getElementById("agent-kpis").innerHTML = [
       kpi("search", "bg-grad-blue", "Investigations", decisions.length, "alerts checked"),
       kpi("shield-fill-exclamation", "bg-grad-red", "Attacks confirmed", count(["acted", "confirmed", "awaiting"]), "real problems"),
       kpi("check-circle", "bg-grad-green", "False alarms", count(["false_alarm"]), "no action needed"),
-      kpi("person-check", "bg-grad-orange", "Your decisions", acts.filter((s) => ["declined", "expired"].includes(s)).length +
-          acts.filter((s) => s === "awaiting_approval").length, `${acts.filter((s) => s === "awaiting_approval").length} waiting now`),
+      kpi("person-check", "bg-grad-orange", "Your decisions", decided,
+          `${acts.filter((s) => s === "awaiting_approval").length} waiting now`),
       kpi("gear", "bg-grad-purple", "Actions done", acts.filter((s) => s === "executed").length, "carried out on the building"),
       kpi("x-octagon", "bg-grad-gray", "Blocked", acts.filter((s) => s === "rejected").length, "stopped by the safety check"),
     ].join("");

@@ -105,7 +105,7 @@ const Glossary = (() => {
 const Verdict = (() => {
   const STYLES = {
     acted: {label: "Attack confirmed · action taken", icon: "shield-fill-exclamation", bg: "#fee2e2", fg: "#991b1b"},
-    awaiting: {label: "Attack confirmed · waiting for your approval", icon: "person-check", bg: "#fef3c7", fg: "#92400e"},
+    awaiting: {label: "Attack confirmed · waiting for your approval", icon: "person-check", bg: "#fef9c3", fg: "#a16207"},
     confirmed: {label: "Attack confirmed", icon: "shield-exclamation", bg: "#ffedd5", fg: "#9a3412"},
     false_alarm: {label: "False alarm", icon: "check-circle-fill", bg: "#dcfce7", fg: "#166534"},
     not_attack: {label: "Not an attack", icon: "info-circle-fill", bg: "#e0f2fe", fg: "#075985"},
