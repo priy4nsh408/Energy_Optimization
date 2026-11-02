@@ -541,6 +541,7 @@ class AgentSettings:
 
     PROVIDERS: ClassVar[tuple[str, ...]] = ("auto", "anthropic", "offline")
     EFFORTS: ClassVar[tuple[str, ...]] = ("low", "medium", "high", "xhigh", "max")
+    APPROVAL_MODES: ClassVar[tuple[str, ...]] = ("auto", "manual")
     SEVERITIES: ClassVar[tuple[str, ...]] = ("low", "medium", "high", "critical")
 
     llm_provider: str = "auto"
@@ -557,8 +558,12 @@ class AgentSettings:
     max_data_age_s: float = 1800.0          # control actions need a reading at most this old
     max_isolated_sensors_per_zone: int = 2
     audit_log: Path = BASE_DIR / "logs" / "agent_decisions.jsonl"
+    approval_mode: str = "auto"             # manual: safety-approved actions also wait for an operator
+    approval_timeout_s: float = 300.0       # wall-clock seconds before a waiting action expires
 
     def __post_init__(self) -> None:
+        if self.approval_mode not in self.APPROVAL_MODES:
+            raise ConfigurationError(f"AGENT_APPROVAL_MODE must be one of {list(self.APPROVAL_MODES)}.")
         if self.llm_provider not in self.PROVIDERS:
             raise ConfigurationError(f"AGENT_LLM_PROVIDER must be one of {list(self.PROVIDERS)}.")
         if self.llm_effort not in self.EFFORTS:
@@ -591,6 +596,8 @@ class AgentSettings:
             max_isolated_sensors_per_zone=_get_int("AGENT_MAX_ISOLATED_SENSORS_PER_ZONE", 2,
                                                    minimum=1, maximum=10),
             audit_log=_resolve_path(_get_str("AGENT_AUDIT_LOG", "logs/agent_decisions.jsonl")),
+            approval_mode=_get_str("AGENT_APPROVAL_MODE", "auto").lower(),
+            approval_timeout_s=_get_float("AGENT_APPROVAL_TIMEOUT_S", 300.0, minimum=10, maximum=86400),
         )
 
 
@@ -645,6 +652,41 @@ class SystemSettings:
             security_detectors=_get_str("SECURITY_DETECTORS", "auto").lower(),
             security_detector_version=_get_str("SECURITY_DETECTOR_VERSION", "") or None,
             recovery_interval_s=_get_float("AGENT_RECOVERY_INTERVAL_S", 30.0, minimum=1, maximum=3600),
+        )
+
+
+@dataclass(frozen=True)
+class SLMSettings:
+    """Optional small language model (served locally by Ollama) for plain-language text.
+
+    It only *explains*: actions waiting for operator approval (``agent.explainer``)
+    and answers in the dashboard chat (``services.chat``). It never decides
+    anything; without it (``SLM_PROVIDER=off`` or Ollama not running) both use
+    built-in templates.
+    """
+
+    PROVIDERS: ClassVar[tuple[str, ...]] = ("off", "ollama")
+
+    provider: str = "off"
+    base_url: str = "http://localhost:11434"
+    model: str = "qwen2.5:1.5b"
+    timeout_s: float = 30.0
+
+    def __post_init__(self) -> None:
+        if self.provider not in self.PROVIDERS:
+            raise ConfigurationError(f"SLM_PROVIDER must be one of {list(self.PROVIDERS)}.")
+
+    @property
+    def enabled(self) -> bool:
+        return self.provider != "off"
+
+    @classmethod
+    def from_env(cls) -> "SLMSettings":
+        return cls(
+            provider=_get_str("SLM_PROVIDER", "off").lower(),
+            base_url=_get_str("SLM_BASE_URL", "http://localhost:11434").rstrip("/"),
+            model=_get_str("SLM_MODEL", "qwen2.5:1.5b"),
+            timeout_s=_get_float("SLM_TIMEOUT_S", 30.0, minimum=1, maximum=600),
         )
 
 
@@ -716,6 +758,7 @@ class BaseConfig:
         self.EXTERNAL_DATA = ExternalDataSettings.from_env()
         self.OPTIMIZATION = OptimizationSettings.from_env()
         self.AGENT = AgentSettings.from_env()
+        self.SLM = SLMSettings.from_env()
         self.SYSTEM = SystemSettings.from_env()
         self.DASHBOARD = DashboardSettings.from_env(default_controls=self.ENV_NAME != "production")
         self.LOGGING = LoggingSettings.from_env(
@@ -746,6 +789,8 @@ class BaseConfig:
             "carbon_provider": self.EXTERNAL_DATA.carbon_provider,
             "control_mode": self.SYSTEM.control_mode,
             "security_detectors": self.SYSTEM.detector_set,
+            "agent_approval": self.AGENT.approval_mode,
+            "slm": f"{self.SLM.provider} ({self.SLM.model})" if self.SLM.enabled else "off",
             "agent_llm": f"{self.AGENT.resolved_provider}"
                          + (f" ({self.AGENT.llm_model})" if self.AGENT.resolved_provider == "anthropic" else ""),
             "simulator": (f"{self.SIMULATOR.building_id} every {self.SIMULATOR.interval_seconds}s"

@@ -14,7 +14,7 @@ body { background: var(--sb-bg); color: var(--sb-ink); }
 
 /* navigation */
 .navbar.sb-nav { background: linear-gradient(90deg, #0f172a 0%, #1e3a5f 60%, #1d4ed8 140%); }
-.navbar.sb-nav .nav-link { border-radius: 8px; padding: .4rem .75rem; margin-right: .15rem; }
+.navbar.sb-nav .nav-link { border-radius: 8px; padding: .4rem .6rem; margin-right: .1rem; white-space: nowrap; }
 .navbar.sb-nav .nav-link.active { background: rgba(255, 255, 255, .14); }
 .navbar.sb-nav .navbar-brand { font-weight: 700; letter-spacing: .01em; }
 

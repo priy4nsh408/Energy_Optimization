@@ -87,7 +87,9 @@ reading (the start window prints `continuing from ...`), so runs never overlap i
 | Dashboard | live zone readings, building power, energy/CO₂ totals, latest alerts and agent decision; Start/Stop |
 | Energy Analytics | hourly energy and carbon, ML predictions vs. measured power, baseline vs. optimized |
 | Security Monitoring | trigger a simulated attack (type, zone, duration, parameters); watch its detection latency, the alerts, drift and isolated sensors |
-| Agentic AI Activity | each investigation: diagnosis, impact, recommendations, tools called, proposed actions with the safety verdict and the simulator's result |
+| Agentic AI Activity | actions waiting for your approval (manual mode); each investigation: diagnosis, impact, tools called, and each action's progress (proposed → safety check → your approval → carried out) |
+| Data Pipeline | live diagram of the data flow (simulator → Kafka → services → PostgreSQL → dashboard → back to the building), with message and row counts; click a box for details |
+| **Ask AI** (every page) | chat button at the bottom right: ask about power, energy, alerts, the agent, ML accuracy, optimizer savings or terms like PSI |
 
 **Tips:**
 
@@ -96,6 +98,35 @@ reading (the start window prints `continuing from ...`), so runs never overlap i
 - A good first test is temperature spoofing on Z1 for 60 minutes with `offset_c` 4. The agent
   isolates the temperature sensor and returns the zone to its baseline schedule. After about an
   hour of quiet simulated time it restores the sensor.
+
+### Approving the agent's actions (manual mode)
+
+With `AGENT_APPROVAL_MODE=manual` in `.env` (the default for new installations), every action the
+AI agent wants to take waits for you:
+
+1. The agent investigates an alert and proposes, for example, "quarantine the temperature sensor".
+2. The fixed **safety validator** checks it. Unsafe proposals are blocked here.
+3. The remaining actions appear under **Waiting for your approval** on the AI Agent page (a yellow
+   badge in the menu shows how many). Each one explains what was found, what the action does, its
+   effect on energy and the optimizer, and what happens if you decline.
+4. **Approve**: the safety validator checks the action again against the latest state, then it is
+   carried out. **Decline**: nothing changes. No answer within `AGENT_APPROVAL_TIMEOUT_S` (300 s):
+   the action expires and nothing changes.
+
+`AGENT_APPROVAL_MODE=auto` runs approved actions at once (the earlier behaviour).
+
+### Optional: a small language model (SLM) for explanations and chat
+
+Without a model, explanations and chat answers come from built-in templates filled with live data.
+For more natural wording, run a small model locally with [Ollama](https://ollama.com):
+
+```powershell
+ollama pull qwen2.5:1.5b
+```
+
+Then set `SLM_PROVIDER=ollama` in `.env` and restart. The model only rephrases facts from the
+database: it never decides whether an action is safe (the validator does) or whether it runs (you
+do). If Ollama is not running, everything falls back to the templates; the start-up checks report it.
 
 ## 5. Verify the installation end to end
 
@@ -108,7 +139,7 @@ Or: `python -m scripts.verify_system --launch --mode advisory --report docs\resu
 
 - **Isolated run:** the verification starts its own isolated stack (a separate database, topics and
   port 5055) and does not touch your data. It drives the system through the dashboard API and
-  checks every stage (see `ARCHITECTURE.md` §8).
+  checks every stage (see `ARCHITECTURE.md` §9).
 - **Afterwards:** it removes its database and topics, and prints `SYSTEM VERIFICATION PASSED` or
   the failing step.
 
@@ -141,5 +172,9 @@ python -m pytest -m "not kafka and not postgres"   # without Docker
 | No charts or icons | the browser cannot reach the CDNs (offline) |
 | Many false alerts in closed loop | expected in zones the agent returned to the baseline schedule (Module 11 finding); advisory mode avoids it |
 | `external_data_publisher` keeps restarting | `CARBON_PROVIDER=electricitymaps` without `ELECTRICITY_MAPS_API_KEY`; preflight now reports it. Set the key, set `CARBON_PROVIDER=mock`, or start with `-MockExternal` |
+| Preflight: `database schema` version 4, need 5 | `python -m database init` (start.ps1 now runs it automatically) |
+| No approval cards although alerts are confirmed | `AGENT_APPROVAL_MODE=manual` missing in `.env`; or the alert was a false alarm (no action proposed) |
+| Approve does nothing | the agent service must be running; check `logs\stack\agent_service.log` |
+| Preflight: `small language model` warning | Ollama not running or the model not pulled; templates are used meanwhile |
 | A service keeps restarting | read `logs\stack\<service>.log`; the supervisor gives up after 3 restarts |
 | `ExecutionPolicy` error | use the `.bat` files, or `powershell -ExecutionPolicy Bypass -File ...` |

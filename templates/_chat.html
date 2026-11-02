@@ -1,0 +1,22 @@
+{# AI chat assistant, available on every page (answers come from /api/chat). #}
+<button type="button" class="chat-fab" id="chat-open" aria-controls="chat-panel" aria-expanded="false"
+        title="Ask the AI assistant about the building, its data and its models">
+  <i class="bi bi-chat-dots-fill"></i><span class="d-none d-sm-inline"> Ask AI</span>
+</button>
+<section class="chat-panel" id="chat-panel" aria-label="AI assistant" hidden>
+  <header class="chat-head">
+    <div><i class="bi bi-robot"></i> <strong>Building assistant</strong>
+      <div class="chat-sub" id="chat-mode">answers from the live data</div></div>
+    <button type="button" class="btn-close btn-close-white" id="chat-close" aria-label="Close the assistant"></button>
+  </header>
+  <div class="chat-log" id="chat-log" aria-live="polite">
+    <div class="chat-msg bot">Hi! Ask me about this building's data and models, for example its power use, alerts,
+      the AI agent's decisions or what a chart means.</div>
+  </div>
+  <div class="chat-suggest" id="chat-suggest"></div>
+  <form class="chat-form" id="chat-form" autocomplete="off">
+    <input type="text" id="chat-input" class="form-control form-control-sm" maxlength="500"
+           placeholder="Type a question…" aria-label="Your question">
+    <button class="btn btn-primary btn-sm" type="submit" aria-label="Send"><i class="bi bi-send"></i></button>
+  </form>
+</section>

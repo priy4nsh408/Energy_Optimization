@@ -1,0 +1,44 @@
+/* Data pipeline page: HTML nodes over an SVG edge layer in a fixed 1200 x 760 coordinate space. */
+.pipe-scroll { overflow-x: auto; }
+.pipe { position: relative; width: 100%; min-width: 860px; aspect-ratio: 1200 / 760; }
+.pipe-edges { position: absolute; inset: 0; width: 100%; height: 100%; }
+.pipe-edges path { fill: none; stroke-linecap: round; }
+.pipe-edges .edge.idle { stroke: #cbd5e1; stroke-dasharray: 4 6; }
+.pipe-edges .edge.trickle { stroke: #93c5fd; stroke-dasharray: 8 10; animation: flow 3s linear infinite; }
+.pipe-edges .edge.flowing { stroke: #2563eb; stroke-dasharray: 10 8; animation: flow .9s linear infinite; }
+.pipe-edges .edge.feedback.flowing, .pipe-edges .edge.feedback.trickle { stroke: #16a34a; }
+.pipe-edges .edge.operator.flowing, .pipe-edges .edge.operator.trickle { stroke: #d97706; }
+@keyframes flow { to { stroke-dashoffset: -36; } }
+.pipe-edges .edge-label { font-size: 11px; fill: #64748b; }
+
+.pnode { position: absolute; transform: translate(-50%, -50%); background: #fff; border: 1px solid var(--sb-line);
+         border-left: 4px solid var(--node, #94a3b8); border-radius: 10px; padding: .35rem .5rem; cursor: pointer;
+         box-shadow: 0 2px 8px rgba(15, 23, 42, .08); font-size: .72rem; line-height: 1.25; overflow: hidden;
+         transition: box-shadow .2s, transform .2s; text-align: left; }
+.pnode:hover, .pnode:focus-visible { box-shadow: 0 6px 18px rgba(37, 99, 235, .25); outline: none; }
+.pnode.selected { box-shadow: 0 0 0 3px rgba(37, 99, 235, .45); }
+.pnode .ptitle { font-weight: 700; font-size: .8rem; display: flex; align-items: center; gap: .3rem; color: var(--sb-ink); }
+.pnode .ptitle .bi { color: var(--node, #64748b); }
+.pnode .pmetric { color: var(--sb-muted); }
+.pnode .pmetric strong { color: var(--sb-ink); }
+.pnode.active .ptitle::after { content: ""; width: .45rem; height: .45rem; border-radius: 50%; background: #22c55e;
+                               margin-left: auto; box-shadow: 0 0 0 3px rgba(34, 197, 94, .25); }
+.pnode.big { background: linear-gradient(180deg, #fff, #f8fafc); }
+.pnode .topics { list-style: none; padding: 0; margin: .25rem 0 0; }
+.pnode .topics li { display: flex; justify-content: space-between; gap: .4rem; border-top: 1px dashed #e2e8f0; padding: .12rem 0; }
+.pnode .topics li span:last-child { font-variant-numeric: tabular-nums; color: var(--sb-ink); font-weight: 600; }
+.stage-label { position: absolute; top: 0; transform: translateX(-50%); font-size: .68rem; text-transform: uppercase;
+               letter-spacing: .06em; color: #94a3b8; font-weight: 700; white-space: nowrap; }
+
+.legend-flow { display: inline-block; width: 1.6rem; height: 0; border-top: 3px dashed #cbd5e1; vertical-align: middle; }
+.legend-flow.flowing { border-top-color: #2563eb; }
+.legend-flow.trickle { border-top-color: #93c5fd; }
+
+.journey { counter-reset: step; list-style: none; padding: 0; margin: 0; }
+.journey li { position: relative; padding: 0 0 .8rem 2.4rem; font-size: .88rem; }
+.journey li::before { counter-increment: step; content: counter(step); position: absolute; left: 0; top: 0; width: 1.7rem;
+                      height: 1.7rem; border-radius: 50%; background: #2563eb; color: #fff; display: grid; place-items: center;
+                      font-weight: 700; font-size: .8rem; }
+.journey li:not(:last-child)::after { content: ""; position: absolute; left: .82rem; top: 1.8rem; bottom: .1rem;
+                                      border-left: 2px dotted #93c5fd; }
+.journey strong { display: block; }

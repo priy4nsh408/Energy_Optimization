@@ -37,6 +37,7 @@ OPTIMIZATION_COMMANDS = "optimization_commands"
 AGENT_ACTIONS = "agent_actions"
 ENERGY_PREDICTIONS = "energy_predictions"
 SIMULATION_CONTROL = "simulation_control"
+OPERATOR_DECISIONS = "operator_decisions"
 
 
 @dataclass(frozen=True)
@@ -72,6 +73,8 @@ TOPICS: dict[str, TopicSpec] = {spec.name: spec for spec in (
               description="ML predictions of next-interval energy per zone"),
     TopicSpec(SIMULATION_CONTROL, partitions=1, retention_days=1, key="building_id",
               description="Dashboard commands for the simulation manager (start/stop/attack)"),
+    TopicSpec(OPERATOR_DECISIONS, partitions=1, retention_days=7, key="action_id",
+              description="Operator approvals/declines of agent actions (dashboard -> agent service)"),
 )}
 
 

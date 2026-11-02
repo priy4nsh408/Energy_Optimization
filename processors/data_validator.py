@@ -40,7 +40,11 @@ ALERT_STATUSES = {"open", "acknowledged", "resolved"}
 ACTION_SOURCES = {"optimizer", "agent", "operator", "baseline"}
 ACTION_TYPES = {"set_setpoint", "set_hvac_mode", "set_lighting", "clear_overrides", "isolate_sensor",
                 "restore_sensor"}
-ACTION_STATUSES = {"proposed", "approved", "rejected", "executed", "failed"}
+# awaiting_approval: passed the safety validator, waiting for an operator (AGENT_APPROVAL_MODE=manual);
+# declined: the operator said no; expired: nobody decided within AGENT_APPROVAL_TIMEOUT_S.
+ACTION_STATUSES = {"proposed", "awaiting_approval", "approved", "rejected", "declined", "expired", "executed",
+                   "failed"}
+OPERATOR_DECISIONS = ("approve", "decline")
 POWER_SUM_TOLERANCE_KW = 0.01
 POWER_SUM_TOLERANCE_REL = 0.01
 
@@ -362,5 +366,20 @@ def validate_control_message(message: Any) -> dict[str, Any]:
                 clean[name] = value
         result["attack"]["params"] = clean
         c.errors.extend(f"attack.{e}" for e in a.errors)
+    c.raise_if_invalid()
+    return result
+
+
+def validate_operator_decision(message: Any) -> dict[str, Any]:
+    """Contract for ``operator_decisions`` (dashboard -> workers.agent_service).
+
+    ``{"decision_id", "action_id", "decision": approve|decline, "requested_at", "operator"?, "note"?}``.
+    Returns a normalised copy.
+    """
+    c = _Checker(message)
+    result = {"decision_id": c.uuid("decision_id"), "action_id": c.uuid("action_id"),
+              "decision": c.text("decision", choices=OPERATOR_DECISIONS), "requested_at": c.timestamp("requested_at"),
+              "operator": c.text("operator", required=False, max_length=100) or "dashboard user",
+              "note": c.text("note", required=False, max_length=500)}
     c.raise_if_invalid()
     return result

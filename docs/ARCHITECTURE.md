@@ -47,8 +47,8 @@ PostgreSQL is the system of record. Flask never consumes Kafka: it reads Postgre
 | `prediction_service` | `building_sensor_data` | `energy_predictions` | 6 |
 | `optimization_service` | sensor data, predictions, carbon, `agent_actions` | `optimization_commands` | 7 |
 | `security_service` | `building_sensor_data` | `security_alerts` (attacks, anomalies, security drift, data drift) | 8 |
-| `agent_service` | `security_alerts` | `optimization_commands` (approved agent commands); `agent_actions`; `agent_decisions`, `optimization_actions`; JSONL audit log | 9 |
-| dashboard (`app.py`) | – | `simulation_control` | 10 |
+| `agent_service` | `security_alerts`; `operator_decisions` (group `agent_service_operator`, manual approval only) | `optimization_commands` (approved agent commands); `agent_actions`; `agent_decisions`, `optimization_actions`; JSONL audit log | 9 |
+| dashboard (`app.py`) | – | `simulation_control`, `operator_decisions` | 10, 13 |
 
 **Consumer groups.** Each service has its own consumer group, so every service receives every
 message of its topics. `tests/test_architecture.py` checks that no two services share a group.
@@ -94,6 +94,11 @@ exceptions need care:
    against the latest state before execution.
    - An isolation is a software quarantine, applied in the agent service.
    - Approved control commands go to `optimization_commands`.
+   - With `AGENT_APPROVAL_MODE=manual`, an approved action first becomes `awaiting_approval`
+     (`agent.approval.ApprovalGate`) with a plain-language explanation (`agent.explainer`; worded
+     by a local small language model if `SLM_PROVIDER=ollama`). The operator's Approve/Decline on
+     the dashboard goes to the `operator_decisions` topic; the agent service validates the action
+     again and only then executes it. Unanswered actions expire. Recovery restores are not gated.
 5. `simulation_manager` applies the command to the building and reports `executed` on
    `agent_actions`.
    - `optimization_service` reads the isolation from `agent_actions` and stops optimizing that zone.
@@ -110,7 +115,8 @@ exceptions need care:
 |---|---|---|
 | Building physics, overrides | `simulation_manager` (in memory) | readings on `building_sensor_data` |
 | Sensor quarantine | `agent_service` (in memory, thread-safe) | `agent_actions`; PostgreSQL; rebuilt from PostgreSQL at start-up by the agent and optimization services |
-| Action lifecycle | upserts in `optimization_actions` | status moves forward only (`proposed → approved/rejected → executed/failed`); later messages add parameters (e.g. the simulator's result) |
+| Action lifecycle | upserts in `optimization_actions` | status moves forward only (`proposed → [awaiting_approval →] approved/rejected/declined/expired → executed/failed`); later messages add parameters (e.g. the simulator's result) |
+| Actions waiting for approval | `agent_service` (`ApprovalGate`, in memory) | `optimization_actions` (status `awaiting_approval`); rebuilt from PostgreSQL at start-up |
 | Simulation state | `simulation_status` (heartbeat every 3 s) | dashboard status, single-instance guard |
 | Simulated timeline | `run_stack` picks the start: 9 Feb 2026, or one step after the latest stored reading | reading ids depend on seed *and* start time, so a new run never collides with stored history (the duplicate check would otherwise drop its readings) |
 | Everything for display | PostgreSQL | dashboard queries, anchored on the most recently *stored* data |
@@ -144,7 +150,20 @@ exceptions need care:
     `python -m streaming.topics` (run by the bootstrap) creates all of them.
   - `scripts/preflight.py` reports what's missing, with the command that fixes it.
 
-## 7. Imports and configuration
+## 7. Explanations, chat and the pipeline view
+
+- **Small language model (optional).** `agent.slm.OllamaSLM` calls a local model through Ollama.
+  It is used in two places, both with a template fallback: the explanation of an action waiting
+  for approval, and the dashboard chat (`services.chat`). It receives only facts from the
+  database and never makes a decision.
+- **Chat** (`POST /api/chat`). A question is matched to a topic (power, energy, alerts, agent,
+  approvals, accuracy, optimizer, glossary terms, ...); the topic's handler reads the facts from
+  `DashboardData` and writes the answer.
+- **Data Pipeline page** (`GET /api/pipeline`). Rows written per stage in the last minute and in
+  total (PostgreSQL), plus retained messages per Kafka topic read from partition offsets with the
+  admin client (no consumer group: the dashboard still never consumes Kafka).
+
+## 8. Imports and configuration
 
 - **Imports.** There are no import cycles at module level; `tests/test_architecture.py` checks
   this with an AST-based graph. Heavy or optional dependencies (Anthropic SDK, matplotlib, the
@@ -157,7 +176,7 @@ exceptions need care:
     detectors and control mode, a missing API key, a busy port, and a simulation that's already
     running.
 
-## 8. Verification
+## 9. Verification
 
 | What | Command | Covers |
 |---|---|---|

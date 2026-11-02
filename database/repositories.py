@@ -42,7 +42,10 @@ TABLES: dict[type, str] = {
 }
 
 ALERT_STATUS_RANK = {"open": 0, "acknowledged": 1, "resolved": 2}
-ACTION_STATUS_RANK = {"proposed": 0, "approved": 1, "rejected": 1, "executed": 2, "failed": 2}
+# Statuses only move forward. With operator approval: proposed -> awaiting_approval -> approved | declined |
+# expired | rejected (re-check) -> executed | failed.
+ACTION_STATUS_RANK = {"proposed": 0, "awaiting_approval": 1, "approved": 2, "rejected": 2, "declined": 2,
+                      "expired": 2, "executed": 3, "failed": 3}
 
 
 def _values(record: Any) -> dict[str, Any]:
@@ -101,7 +104,7 @@ def upsert_optimization_action(conn: psycopg.Connection, record: OptimizationAct
     incoming = sql.SQL("EXCLUDED.status")
     conflict = sql.SQL(
         "ON CONFLICT (action_id) DO UPDATE SET status = EXCLUDED.status, "
-        "updated_at = EXCLUDED.updated_at, "
+        "updated_at = EXCLUDED.updated_at, stored_at = now(), "
         "safety_reason = COALESCE(EXCLUDED.safety_reason, optimization_actions.safety_reason), "
         "reason = COALESCE(EXCLUDED.reason, optimization_actions.reason), "
         # Later stages add details (e.g. the simulator's execution result); newer keys win.

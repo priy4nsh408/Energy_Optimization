@@ -365,6 +365,7 @@ def isolated_environment(mode: str, port: int) -> dict[str, str]:
     return {"POSTGRES_DB": f"smart_building_{tag}", "KAFKA_TOPIC_PREFIX": f"{tag}_",
             "KAFKA_CONSUMER_GROUP_PREFIX": tag, "FLASK_PORT": str(port), "CONTROL_MODE": mode,
             "WEATHER_PROVIDER": "mock", "CARBON_PROVIDER": "mock", "AGENT_LLM_PROVIDER": "offline",
+            "AGENT_APPROVAL_MODE": "auto", "SLM_PROVIDER": "off",
             "AGENT_AUDIT_LOG": f"logs/{tag}_agent_decisions.jsonl", "LOG_TO_FILE": "false"}
 
 

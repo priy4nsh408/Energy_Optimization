@@ -205,6 +205,16 @@ class FakeData:
     def action_summary(self):
         return []
 
+    def approvals(self, limit=50):
+        return [{"action_id": "11111111-1111-4111-8111-111111111111", "zone_id": "Z1", "action_type": "clear_overrides",
+                 "parameters": {"approval": {"title": "Put Z1 back on its normal schedule"}},
+                 "waiting_since": START.isoformat()}]
+
+    def pipeline(self):
+        return {"stages": {"sensor_readings": {"stage": "sensor_readings", "total": 10, "last_minute": 5,
+                                               "latest": START.isoformat()}},
+                "approvals": {"waiting": 1, "declined": 0, "expired": 0, "approved": 0}, "status": self.status()}
+
 
 class FakeServices(DashboardServices):
     def __init__(self, config, data=None, control=None):
@@ -215,6 +225,9 @@ class FakeServices(DashboardServices):
         if self.fake is None:
             raise ServiceUnavailableError("PostgreSQL not reachable")
         return self.fake
+
+    def kafka_stats(self):
+        return SimpleNamespace(snapshot=lambda: {"building_sensor_data": {"messages": 7, "end_offset": 7}})
 
 
 @pytest.fixture
@@ -229,14 +242,16 @@ def client_factory(clean_env):
 
 class TestFlaskDashboard:
     @pytest.mark.parametrize("path, text", [("/", "Live sensor readings"), ("/energy", "ML prediction vs. reality"),
-                                            ("/security", "Simulated attacks"), ("/agent", "Investigations")])
+                                            ("/security", "Simulated attacks"), ("/agent", "Waiting for your approval"),
+                                            ("/pipeline", "Live data flow")])
     def test_pages_render(self, client_factory, path, text):
         response = client_factory().get(path)
         html = response.get_data(as_text=True)
         assert response.status_code == 200 and text in html
-        for page in ("Energy Analytics", "Security Monitoring", "Agentic AI Activity"):
+        for page in ("Energy Analytics", "Security Monitoring", "Agentic AI Activity", "Data Pipeline"):
             assert page in html                                  # navigation
-        assert 'id="attack-form"' in html or path in ("/energy", "/agent")
+        assert 'id="chat-open"' in html and 'id="approval-badge"' in html          # on every page
+        assert 'id="attack-form"' in html or path in ("/energy", "/agent", "/pipeline")
 
     def test_controls_hidden_when_disabled(self, client_factory):
         html = client_factory(controls_enabled=False).get("/").get_data(as_text=True)
@@ -246,7 +261,8 @@ class TestFlaskDashboard:
                                       "/api/energy/summary", "/api/energy/predictions?zone_id=Z2",
                                       "/api/energy/optimization", "/api/security/alerts", "/api/security/timeline",
                                       "/api/security/drift", "/api/security/attacks", "/api/security/isolated",
-                                      "/api/agent/decisions", "/api/agent/actions?source=agent"])
+                                      "/api/agent/decisions", "/api/agent/actions?source=agent",
+                                      "/api/agent/approvals", "/api/pipeline"])
     def test_api_endpoints(self, client_factory, path):
         response = client_factory().get(path)
         assert response.status_code == 200 and response.is_json
@@ -271,6 +287,31 @@ class TestFlaskDashboard:
         bad = client.post("/api/simulation/attack", json={**SPOOF, "params": {"offset_c": 99}})
         assert bad.status_code == 400 and "params.offset_c" in bad.get_json()["details"][0]
         assert [m[2]["command"] for m in producer.sent] == ["start", "attack"]
+
+    def test_operator_decisions(self, client_factory):
+        producer = FakeProducer()
+        client = client_factory(control=SimulationControl(lambda: producer, "building-01"))
+        action = "11111111-1111-4111-8111-111111111111"
+        response = client.post(f"/api/agent/actions/{action}/decision", json={"decision": "approve"})
+        assert response.status_code == 202
+        assert producer.sent[-1][0] == "operator_decisions" and producer.sent[-1][2]["action_id"] == action
+        assert client.post(f"/api/agent/actions/{action}/decision", json={"decision": "sure"}).status_code == 400
+        assert client.post("/api/agent/actions/not-a-uuid/decision", json={"decision": "approve"}).status_code == 404
+        assert client.post(f"/api/agent/actions/{action}/decision", data="x").status_code == 415
+        disabled = client_factory(controls_enabled=False)
+        assert disabled.post(f"/api/agent/actions/{action}/decision", json={"decision": "approve"}).status_code == 403
+        approvals = client.get("/api/agent/approvals").get_json()
+        assert approvals["mode"] in ("auto", "manual") and approvals["rows"][0]["action_id"] == action
+
+    def test_chat_and_pipeline(self, client_factory):
+        client = client_factory()
+        answer = client.post("/api/chat", json={"question": "Which actions are waiting for my approval?",
+                                                "page": "pages.agent"}).get_json()
+        assert answer["topic"] == "approvals" and "Put Z1 back" in answer["answer"]
+        assert answer["source"] == "built-in answers"
+        assert client.post("/api/chat", json={"question": " "}).status_code == 400
+        pipeline = client.get("/api/pipeline").get_json()
+        assert pipeline["stages"]["sensor_readings"]["last_minute"] == 5 and "kafka" in pipeline
 
     def test_controls_disabled_and_kafka_down(self, client_factory):
         assert client_factory(controls_enabled=False).post("/api/simulation/start", json={}).status_code == 403

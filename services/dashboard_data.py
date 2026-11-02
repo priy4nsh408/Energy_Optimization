@@ -93,6 +93,7 @@ class DashboardData:
                             "ORDER BY observed_at DESC LIMIT 1")
         counts = self._one("""
             SELECT (SELECT count(*) FROM security_alerts WHERE status <> 'resolved') AS open_alerts,
+                   (SELECT count(*) FROM optimization_actions WHERE status = 'awaiting_approval') AS awaiting_approval,
                    (SELECT count(*) FROM agent_decisions) AS agent_decisions,
                    (SELECT count(*) FROM optimization_actions) AS actions,
                    (SELECT count(*) FROM simulated_attacks) AS simulated_attacks""")
@@ -262,6 +263,42 @@ class DashboardData:
                    safety_reason, related_alert_id
             FROM optimization_actions WHERE (%s::text IS NULL OR source = %s)
             ORDER BY updated_at DESC LIMIT %s""", (source, source, _limit(limit, 100)))
+
+    def approvals(self, limit: Any = 50) -> list[dict[str, Any]]:
+        """Agent actions waiting for an operator (AGENT_APPROVAL_MODE=manual), oldest first."""
+        return self._rows("""
+            SELECT a.action_id, a.zone_id, a.created_at, a.updated_at AS waiting_since, a.action_type, a.parameters,
+                   a.reason, a.safety_reason, a.related_alert_id, s.severity,
+                   s.details->>'classification' AS classification
+            FROM optimization_actions a LEFT JOIN security_alerts s ON s.alert_id = a.related_alert_id
+            WHERE a.status = 'awaiting_approval' ORDER BY a.updated_at LIMIT %s""", (_limit(limit, 50),))
+
+    def pipeline(self) -> dict[str, Any]:
+        """Rows written by each pipeline stage: in the last minute (wall clock), in total, and the latest time."""
+        stages = {
+            "sensor_readings": ("sensor_readings", "ingested_at", "TRUE"),
+            "energy_records": ("energy_records", "processed_at", "TRUE"),
+            "energy_predictions": ("energy_predictions", "ingested_at", "TRUE"),
+            "weather_records": ("weather_records", "ingested_at", "TRUE"),
+            "carbon_records": ("carbon_intensity_records", "ingested_at", "TRUE"),
+            "optimizer_actions": ("optimization_actions", "stored_at", "source = 'optimizer'"),
+            "security_alerts": ("security_alerts", "updated_at", "TRUE"),
+            "agent_decisions": ("agent_decisions", "finished_at", "TRUE"),
+            "agent_actions": ("optimization_actions", "stored_at", "source = 'agent'"),
+            "invalid_events": ("invalid_events", "received_at", "TRUE"),
+        }
+        parts = [f"""SELECT '{name}' AS stage, count(*) AS total,
+                        count(*) FILTER (WHERE {column} > now() - interval '60 seconds') AS last_minute,
+                        max({column}) AS latest FROM {table} WHERE {where}"""
+                 for name, (table, column, where) in stages.items()]
+        rows = {r["stage"]: r for r in self._rows(" UNION ALL ".join(parts))}
+        approvals = self._one("""
+            SELECT count(*) FILTER (WHERE status = 'awaiting_approval') AS waiting,
+                   count(*) FILTER (WHERE status = 'declined') AS declined,
+                   count(*) FILTER (WHERE status = 'expired') AS expired,
+                   count(*) FILTER (WHERE status IN ('approved', 'executed') AND parameters ? 'approval') AS approved
+            FROM optimization_actions WHERE source = 'agent'""")
+        return {"stages": rows, "approvals": approvals, "status": self.status()}
 
     def action_summary(self) -> list[dict[str, Any]]:
         return self._rows("SELECT source, action_type, status, count(*) AS n FROM optimization_actions "

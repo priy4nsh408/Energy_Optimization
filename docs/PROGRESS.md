@@ -153,6 +153,20 @@ These are git-ignored, either because they are large or because they are generat
    was available in the development environment. Run `python -m agent.demo --provider anthropic`.
 9. **Windows.** Not yet run on Windows; developed and tested on Linux.
 
+## After Module 12: operator approval, explanations, chat, pipeline view
+
+- `AGENT_APPROVAL_MODE=manual`: agent actions that pass the safety validator wait for an operator
+  (`agent/approval.py`); explained by `agent/explainer.py` (templates, or a local Ollama model via
+  `agent/slm.py` with `SLM_PROVIDER=ollama`). Decisions travel dashboard → `operator_decisions` →
+  `agent_service`; approved actions are re-validated before they run; unanswered ones expire.
+  Schema version 5 adds the statuses `awaiting_approval`, `declined`, `expired` and the column
+  `optimization_actions.stored_at`.
+- Dashboard: "Ask AI" chat on every page (`services/chat.py`, `POST /api/chat`) and a Data
+  Pipeline page (`/pipeline`, `GET /api/pipeline`).
+- Verified live in an isolated database: attack → two actions waiting, nothing changed before
+  approval → approved from the dashboard API → both executed, sensor quarantined. The Ollama path
+  is covered by tests against a fake Ollama server only (no model was available here).
+
 ## Possible next steps
 
 All 11 planned modules are done. Ideas the evaluation pointed to, none of them implemented:

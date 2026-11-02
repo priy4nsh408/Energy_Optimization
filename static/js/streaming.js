@@ -70,6 +70,8 @@ const App = (() => {
     (handlers[event] || []).forEach((h) => { try { h(payload); } catch (e) { console.error(e); } });
   }
 
+  let lastWaiting = -1;                      // -1: first status, no toast for actions already waiting
+
   function updateStatus(status) {
     if (!status || status.error) {
       banner(status && status.error ? "Data unavailable: database unavailable." : null);
@@ -78,9 +80,18 @@ const App = (() => {
     const sim = status.simulation;
     const state = sim ? sim.state : "not started";
     const el = document.getElementById("sim-state");
-    el.textContent = `simulation: ${state}`;
+    el.textContent = state;
+    el.title = `Simulation: ${state}`;
     el.className = "badge " + ({running: "text-bg-success", paused: "text-bg-warning"}[state] || "text-bg-secondary");
     document.getElementById("sim-time").textContent = fmt.time(status.latest_reading);
+    const waiting = Number((status.counts || {}).awaiting_approval || 0);
+    const badge = document.getElementById("approval-badge");
+    if (badge) {
+      badge.classList.toggle("d-none", !waiting);
+      badge.querySelector("span").textContent = waiting;
+      if (waiting > lastWaiting && lastWaiting >= 0) toast(`${waiting} action(s) are waiting for your approval (AI Agent page)`, "warning");
+      lastWaiting = waiting;
+    }
     const detail = document.getElementById("sim-detail");
     if (detail) {
       detail.textContent = sim ? `${sim.ticks} ticks · ${sim.message || ""}` :

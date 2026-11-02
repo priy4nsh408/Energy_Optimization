@@ -22,6 +22,8 @@ class DashboardServices:
         self._database = database
         self._data: DashboardData | None = None
         self._control = control
+        self._chat = None
+        self._kafka_stats = None
         self._lock = threading.Lock()
 
     def data(self) -> DashboardData:
@@ -51,3 +53,22 @@ class DashboardServices:
                 self._control = SimulationControl(lambda: JsonProducer(config.KAFKA, name="web"),
                                                   config.SIMULATOR.building_id)
             return self._control
+
+    def chat(self):
+        """Chat assistant (built-in answers; a local SLM rewrites them when ``SLM_PROVIDER=ollama``)."""
+        data = self.data()
+        with self._lock:
+            if self._chat is None:
+                from agent.slm import create_slm
+                from services.chat import ChatAssistant
+
+                self._chat = ChatAssistant(data, create_slm(self.config.SLM))
+            return self._chat
+
+    def kafka_stats(self):
+        with self._lock:
+            if self._kafka_stats is None:
+                from services.kafka_stats import KafkaTopicStats
+
+                self._kafka_stats = KafkaTopicStats(self.config.KAFKA)
+            return self._kafka_stats

@@ -59,9 +59,10 @@ class Building:
         self.data.add_alert(alert)
         return alert
 
-    def action(self, action_type: str, zone: str = "Z1", alert_id: str | None = None, **parameters):
+    def action(self, action_type: str, zone: str = "Z1", alert_id: str | None = None, decision_id: str = "d1",
+               **parameters):
         return ProposedAction(zone_id=zone, action_type=action_type, parameters=parameters, reason="test",
-                              created_at=self.data.now(), decision_id="d1", related_alert_id=alert_id)
+                              created_at=self.data.now(), decision_id=decision_id, related_alert_id=alert_id)
 
     def check(self, action: ProposedAction, now: datetime | None = None):
         return self.validator.validate(action, latest_event=self.data.latest_event(action.zone_id),
@@ -135,9 +136,17 @@ class TestSafetyValidator:
 
     def test_rate_limit(self):
         b = Building(max_actions_per_zone_per_hour=2)
-        for _ in range(2):
-            b.validator.record_approved(b.action("clear_overrides"), b.data.now())
+        for i in range(2):
+            b.validator.record_approved(b.action("clear_overrides", decision_id=f"earlier{i}"), b.data.now())
         assert "rate limit" in b.check(b.action("clear_overrides")).text
+
+    def test_rate_limit_does_not_count_the_action_itself(self):
+        """An action recorded when it first passed is re-checked at operator approval without counting itself."""
+        b = Building(max_actions_per_zone_per_hour=2)
+        b.validator.record_approved(b.action("clear_overrides", decision_id="earlier"), b.data.now())
+        waiting = b.action("clear_overrides")
+        b.validator.record_approved(waiting, b.data.now())
+        assert b.check(waiting).approved
 
     def test_untrusted_occupancy_is_treated_as_occupied(self):
         night = Building(start=datetime(2026, 1, 12, 2, 0, tzinfo=timezone.utc), hours=0.5)
