@@ -225,10 +225,16 @@ class IncidentAgent:
 
     def _execute(self, state: AgentState) -> dict[str, Any]:
         now = self.data.now() or datetime.now(timezone.utc)
-        for action in state["incident"].proposals:
+        incident = state["incident"]
+        # An operator-approval gate (agent.approval) also gets the alert and assessment, to explain the action.
+        with_context = getattr(self.gateway, "execute_incident", None)
+        for action in incident.proposals:
             if action.status != "approved":
                 continue
-            action.status, action.result = self.gateway.execute(action, now)
+            if with_context is not None:
+                action.status, action.result = with_context(action, now, incident.alert, incident.assessment)
+            else:
+                action.status, action.result = self.gateway.execute(action, now)
             logger.info("Agent action", extra={"action_id": action.action_id, "zone_id": action.zone_id,
                                                "action_type": action.action_type, "status": action.status})
         return {}

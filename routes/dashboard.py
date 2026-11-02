@@ -10,7 +10,8 @@ from simulator.building_model import default_zones
 bp = Blueprint("pages", __name__)
 
 PAGES = [("pages.index", "Dashboard", "speedometer2"), ("pages.energy", "Energy Analytics", "lightning-charge"),
-         ("pages.security", "Security Monitoring", "shield-lock"), ("pages.agent", "Agentic AI Activity", "robot")]
+         ("pages.security", "Security Monitoring", "shield-lock"), ("pages.agent", "Agentic AI Activity", "robot"),
+         ("pages.pipeline", "Data Pipeline", "diagram-3")]
 
 
 def _render(template: str, **context):
@@ -20,6 +21,8 @@ def _render(template: str, **context):
     return render_template(template, pages=PAGES, controls_enabled=config.DASHBOARD.controls_enabled,
                            building_id=config.SIMULATOR.building_id, attack_parameters=attack_parameters,
                            max_attack_minutes=MAX_ATTACK_MINUTES, control_mode=config.SYSTEM.control_mode,
+                           approval_mode=config.AGENT.approval_mode, approval_timeout_s=config.AGENT.approval_timeout_s,
+                           slm_name=f"{config.SLM.model} (Ollama)" if config.SLM.enabled else None,
                            zones=[(z.zone_id, z.name, z.zone_type) for z in default_zones()], **context)
 
 
@@ -41,3 +44,8 @@ def security():
 @bp.get("/agent")
 def agent():
     return _render("agent.html", active="pages.agent")
+
+
+@bp.get("/pipeline")
+def pipeline():
+    return _render("pipeline.html", active="pages.pipeline")

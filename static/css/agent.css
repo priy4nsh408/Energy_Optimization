@@ -1,5 +1,6 @@
 /* AI agent page: process flow, investigation cards. */
-.flow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1rem; position: relative; }
+.flow { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1rem; position: relative; }
+.flow-step.off { opacity: .45; }
 .flow-step { display: flex; flex-direction: column; align-items: center; text-align: center; gap: .3rem; font-size: .85rem;
              position: relative; }
 .flow-step span { color: var(--sb-muted); font-size: .8rem; }
@@ -27,3 +28,23 @@
 .investigation details { font-size: .8rem; margin-top: .6rem; }
 .investigation details summary { cursor: pointer; color: var(--sb-muted); }
 .investigation dl { margin: .5rem 0 0; }
+
+/* operator approval */
+.approval-panel { border-top: 4px solid #f59e0b; }
+.approval-card { border: 1px solid #fde68a; background: #fffbeb; border-radius: 12px; padding: .9rem 1rem; margin-bottom: .8rem; }
+.approval-card .summary { font-size: .95rem; background: #fff; border-radius: 10px; padding: .6rem .75rem; border: 1px solid #fef3c7; }
+.approval-card .summary .bi { color: #d97706; margin-right: .3rem; }
+.approval-card .why { display: flex; gap: .5rem; font-size: .82rem; padding: .3rem 0; }
+.approval-card .why > .bi { color: #b45309; font-size: 1rem; }
+.approval-card .countdown { background: #fff; color: #92400e; border: 1px solid #fde68a; }
+
+/* progress of one action: proposed -> safety check -> approval -> carried out */
+.stepper { list-style: none; display: flex; flex-wrap: wrap; gap: .25rem; padding: 0; margin: .35rem 0; font-size: .72rem; }
+.stepper li { display: inline-flex; align-items: center; gap: .25rem; padding: .12rem .45rem; border-radius: 999px;
+              background: #f1f5f9; color: #94a3b8; }
+.stepper li:not(:last-child)::after { content: "›"; margin-left: .25rem; color: #cbd5e1; }
+.stepper li.done { background: #dcfce7; color: #166534; }
+.stepper li.now { background: #fef3c7; color: #92400e; font-weight: 600; }
+.stepper li.fail { background: #fee2e2; color: #991b1b; font-weight: 600; }
+.stepper li.skip { background: #f1f5f9; color: #64748b; font-style: italic; }
+@media (min-width: 769px) and (max-width: 1200px) { .flow { grid-template-columns: repeat(3, 1fr); } .flow-step:nth-child(3)::after { display: none; } }

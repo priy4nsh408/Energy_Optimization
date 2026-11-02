@@ -20,6 +20,11 @@ deterministic safety validator.
   they never act on the same state concurrently.
 * Detectors for the investigation tools follow ``CONTROL_MODE`` /
   ``SECURITY_DETECTORS`` (the same set as ``workers.security_service``).
+* ``AGENT_APPROVAL_MODE=manual``: actions that pass the safety validator wait
+  for an operator (:class:`agent.approval.ApprovalGate`), with a plain-language
+  explanation (template, or a small language model with ``SLM_PROVIDER``).
+  Operator answers arrive on ``operator_decisions`` (second consumer group);
+  approved actions are re-validated before they run, unanswered ones expire.
 
 The LLM provider is chosen with ``AGENT_LLM_PROVIDER`` (see config.AgentSettings).
 
@@ -35,26 +40,29 @@ from collections import Counter
 
 from confluent_kafka import KafkaException
 
+from agent.approval import ApprovalGate
 from agent.data import PostgresDataSource
 from agent.dispatch import IncidentDispatcher
 from agent.executor import KafkaCommandGateway
+from agent.explainer import ActionExplainer
 from agent.graph import IncidentAgent
 from agent.isolation import SensorIsolationRegistry
 from agent.llm import create_llm
 from agent.recorder import CompositeRecorder, JsonlRecorder, KafkaActionRecorder, PostgresRecorder
 from agent.recovery import RecoveryPolicy
 from agent.safety import SafetyValidator
+from agent.slm import create_slm
 from agent.tools import AgentToolbox
 from config import ConfigurationError, get_config
 from database.db import Database, DatabaseUnavailableError
 from optimization.hvac_optimizer import building_models
 from optimization.optimizer import ZoneOptimizer
-from processors.data_validator import ValidationError, validate_alert_message
+from processors.data_validator import ValidationError, validate_alert_message, validate_operator_decision
 from security.train import SecurityModelNotFoundError, load_configured_models
 from streaming.consumer import ConsumedMessage, JsonConsumer, KafkaConsumerFatalError
 from streaming.kafka_config import KafkaUnavailableError, create_admin_client, wait_for_broker
 from streaming.producer import JsonProducer
-from streaming.topics import AGENT_ACTIONS, OPTIMIZATION_COMMANDS, SECURITY_ALERTS, ensure_topics
+from streaming.topics import AGENT_ACTIONS, OPERATOR_DECISIONS, OPTIMIZATION_COMMANDS, SECURITY_ALERTS, ensure_topics
 from utils.logging_config import configure_logging
 from utils.shutdown import install_shutdown_handlers
 
@@ -91,16 +99,47 @@ class AgentHandler:
             "outcome": decision.outcome, "errors": decision.errors})
 
 
+class OperatorDecisionHandler:
+    """Apply operator approvals/declines from the dashboard (``operator_decisions``)."""
+
+    def __init__(self, gate: ApprovalGate, lock: threading.Lock, logger) -> None:
+        self.gate, self.lock, self.logger = gate, lock, logger
+        self.stats: Counter[str] = Counter()
+
+    def __call__(self, message: ConsumedMessage) -> None:
+        try:
+            decision = validate_operator_decision(message.value)
+        except ValidationError as exc:
+            self.stats["invalid"] += 1
+            self.logger.warning("Invalid operator decision skipped", extra={"errors": exc.errors})
+            return
+        with self.lock:
+            action = self.gate.decide(str(decision["action_id"]), decision["decision"], decision["operator"],
+                                      decision["note"])
+        self.stats[decision["decision"] if action else "not_waiting"] += 1
+        if action is None:
+            self.logger.info("Operator decision for an action that is not waiting (already decided or expired)",
+                             extra={"action_id": str(decision["action_id"])})
+
+
 class RecoveryLoop:
-    """Periodically restore isolated sensors whose zone is quiet (simulated time from PostgreSQL)."""
+    """Periodically restore isolated sensors whose zone is quiet (simulated time from PostgreSQL).
+
+    Also expires actions that waited too long for an operator (``gate``, manual approval only).
+    """
 
     def __init__(self, recovery: RecoveryPolicy, data: PostgresDataSource, recorder, lock: threading.Lock,
-                 logger, interval_s: float) -> None:
+                 logger, interval_s: float, gate: ApprovalGate | None = None) -> None:
         self.recovery, self.data, self.recorder, self.lock = recovery, data, recorder, lock
-        self.logger, self.interval_s = logger, interval_s
+        self.logger, self.interval_s, self.gate = logger, interval_s, gate
         self.restored = 0
 
     def run_once(self) -> int:
+        if self.gate is not None:
+            with self.lock:
+                for action in self.gate.expire():
+                    self.logger.info("Action expired without an operator decision",
+                                     extra={"action_id": action.action_id, "zone_id": action.zone_id})
         now = self.data.now()
         if now is None:
             return 0
@@ -166,21 +205,38 @@ def main(argv: list[str] | None = None, stop_event: threading.Event | None = Non
     recorder = CompositeRecorder(JsonlRecorder(settings.audit_log), PostgresRecorder(database),
                                  KafkaActionRecorder(producer, AGENT_ACTIONS))
     llm = create_llm(settings)
+    action_recorder = CompositeRecorder(PostgresRecorder(database), KafkaActionRecorder(producer, AGENT_ACTIONS))
+    gateway = KafkaCommandGateway(producer, isolation, OPTIMIZATION_COMMANDS)
+    gate = None
+    if settings.approval_mode == "manual":
+        gate = ApprovalGate(gateway, validator, data, action_recorder,
+                            ActionExplainer(data, create_slm(config.SLM)), timeout_s=settings.approval_timeout_s)
+        waiting = gate.load_from_database(database)
+        logger.info("Operator approval required for agent actions", extra={
+            "timeout_s": settings.approval_timeout_s, "waiting_restored": waiting,
+            "explanations": f"SLM {config.SLM.model}" if config.SLM.enabled else "template"})
     agent = IncidentAgent(llm=llm, toolbox=toolbox, data=data, isolation=isolation, validator=validator,
-                          gateway=KafkaCommandGateway(producer, isolation, OPTIMIZATION_COMMANDS),
-                          recorder=recorder, max_iterations=settings.max_iterations)
+                          gateway=gate or gateway, recorder=recorder, max_iterations=settings.max_iterations)
     lock = threading.Lock()
     handler = AgentHandler(agent, IncidentDispatcher(settings, isolation), logger, lock)
-    action_recorder = CompositeRecorder(PostgresRecorder(database), KafkaActionRecorder(producer, AGENT_ACTIONS))
     recovery = RecoveryLoop(RecoveryPolicy(data, isolation, validator,
                                            KafkaCommandGateway(producer, isolation, OPTIMIZATION_COMMANDS)),
-                            data, action_recorder, lock, logger, config.SYSTEM.recovery_interval_s)
+                            data, action_recorder, lock, logger, config.SYSTEM.recovery_interval_s, gate)
     recovery_thread = threading.Thread(target=recovery.run, args=(stop_event,), name="recovery", daemon=True)
     recovery_thread.start()
+    decisions_consumer = decisions_thread = None
+    if gate is not None:
+        decisions_consumer = JsonConsumer(config.KAFKA, f"{SERVICE}_operator", [OPERATOR_DECISIONS],
+                                          auto_offset_reset="earliest")
+        decisions_thread = threading.Thread(
+            target=decisions_consumer.run, args=(OperatorDecisionHandler(gate, lock, logger),),
+            kwargs={"stop_event": stop_event}, name="operator-decisions", daemon=True)
+        decisions_thread.start()
     consumer = JsonConsumer(config.KAFKA, SERVICE, [SECURITY_ALERTS],
                             auto_offset_reset="earliest" if args.from_beginning else "latest")
     logger.info("Agent service started", extra={
         "provider": llm.provider, "model": llm.model, "min_severity": settings.min_alert_severity,
+        "approval": settings.approval_mode,
         "detectors": security_models.metadata.get("version") if security_models else None,
         "detector_set": config.SYSTEM.detector_set, "isolated_sensors_restored": restored})
     try:
@@ -193,6 +249,9 @@ def main(argv: list[str] | None = None, stop_event: threading.Event | None = Non
     finally:
         stop_event.set()
         recovery_thread.join(timeout=10)
+        if decisions_thread is not None:
+            decisions_thread.join(timeout=10)
+            decisions_consumer.close()
         consumer.close()
         producer.close()
         database.close()

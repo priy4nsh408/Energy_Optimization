@@ -87,3 +87,23 @@ def simulation_attack():
     attack = {k: body.get(k) for k in ("attack_type", "zone_id", "duration_min")}
     attack["params"] = body.get("params") or {}
     return _control("attack", attack)
+
+
+# -- chat and pipeline -------------------------------------------------------------------
+@bp.post("/chat")
+@json_endpoint
+def chat():
+    body = request.get_json(silent=True) or {}
+    question = body.get("question")
+    if not isinstance(question, str) or not question.strip():
+        return jsonify(error="send a JSON body with a non-empty 'question'"), 400
+    return jsonify(services().chat().answer(question, page=str(body.get("page") or "")[:40] or None))
+
+
+@bp.get("/pipeline")
+@json_endpoint
+def pipeline():
+    config = current_app.extensions["app_config"]
+    return jsonify(**data().pipeline(), kafka=services().kafka_stats().snapshot(),
+                   approval_mode=config.AGENT.approval_mode,
+                   slm=f"{config.SLM.model} (Ollama)" if config.SLM.enabled else None)

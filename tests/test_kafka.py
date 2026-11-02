@@ -148,7 +148,7 @@ def test_required_topics_are_registered():
     assert set(topics.TOPICS) == {
         "building_sensor_data", "weather_data", "carbon_intensity",
         "security_alerts", "optimization_commands", "agent_actions", "energy_predictions",
-        "simulation_control"}
+        "simulation_control", "operator_decisions"}
     assert topics.TOPICS["building_sensor_data"].key == "zone_id"
     assert all(spec.partitions >= 1 for spec in topics.TOPICS.values())
     assert topics.TOPICS["weather_data"].kafka_config()["retention.ms"] == str(30 * topics.DAY_MS)

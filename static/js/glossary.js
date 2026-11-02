@@ -105,6 +105,7 @@ const Glossary = (() => {
 const Verdict = (() => {
   const STYLES = {
     acted: {label: "Attack confirmed · action taken", icon: "shield-fill-exclamation", bg: "#fee2e2", fg: "#991b1b"},
+    awaiting: {label: "Attack confirmed · waiting for your approval", icon: "person-check", bg: "#fef9c3", fg: "#a16207"},
     confirmed: {label: "Attack confirmed", icon: "shield-exclamation", bg: "#ffedd5", fg: "#9a3412"},
     false_alarm: {label: "False alarm", icon: "check-circle-fill", bg: "#dcfce7", fg: "#166534"},
     not_attack: {label: "Not an attack", icon: "info-circle-fill", bg: "#e0f2fe", fg: "#075985"},
@@ -120,6 +121,7 @@ const Verdict = (() => {
     if (d.classification === "data_drift" || cause.includes("not an attack")) return "not_attack";
     if (cause.includes("undetermined") || cause.includes("not zone-specific")) return "review";
     if ((d.actions || []).some((a) => ["approved", "executed"].includes(a.status))) return "acted";
+    if ((d.actions || []).some((a) => a.status === "awaiting_approval")) return "awaiting";
     return d.confidence === "low" ? "review" : "confirmed";
   }
 
@@ -134,14 +136,20 @@ const Verdict = (() => {
     const done = (d.actions || []).filter((a) => ["approved", "executed"].includes(a.status))
       .map((a) => Glossary.action(a.action_type, a.parameters).toLowerCase());
     const blocked = (d.actions || []).filter((a) => a.status === "rejected").length;
+    const waiting = (d.actions || []).filter((a) => a.status === "awaiting_approval")
+      .map((a) => Glossary.action(a.action_type, a.parameters).toLowerCase());
+    const refused = (d.actions || []).filter((a) => ["declined", "expired"].includes(a.status)).length;
     switch (kind(d)) {
       case "too_early": return intro + "There is not enough history yet (it needs about one simulated day), so it only keeps watching the zone.";
       case "false_alarm": return intro + "The checks did not confirm the alert, so it is treated as a false alarm and nothing was changed.";
       case "not_attack": return intro + "Conditions have simply changed (e.g. the season), which is not an attack. No action is needed, but the ML model should be retrained.";
       case "acted": return intro + `The checks confirmed the attack, so it acted: ${done.join("; ")}.` +
         (blocked ? ` ${blocked} other proposal(s) were blocked by the safety check.` : "");
+      case "awaiting": return intro + `The checks confirmed the attack. The safety check approved its plan (${waiting.join("; ")}), ` +
+        "which now waits for your approval.";
       case "confirmed": return intro + "The checks confirmed the problem." +
-        (blocked ? ` Its proposed actions were blocked by the safety check (${blocked}).` : " No automatic action was needed.");
+        (refused ? ` Its proposed actions were declined by the operator or expired (${refused}).` :
+         blocked ? ` Its proposed actions were blocked by the safety check (${blocked}).` : " No automatic action was needed.");
       default: return intro + "The result was not clear, so a person should review it.";
     }
   }

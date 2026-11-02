@@ -39,7 +39,9 @@ class IncidentDispatcher:
         isolated = [(a["zone_id"], a["parameters"]["sensor"]) for a in decision.actions
                     if a["action_type"] == "isolate_sensor" and a["status"] == "executed"]
         with self._lock:
-            self._acted[incident_key(alert)] = any(a["status"] in ("executed", "approved") for a in decision.actions)
+            # An action waiting for the operator counts as acted: no re-investigation while the operator decides.
+            self._acted[incident_key(alert)] = any(a["status"] in ("executed", "approved", "awaiting_approval")
+                                                   for a in decision.actions)
             if isolated:
                 self._contained[incident_key(alert)] = isolated
 

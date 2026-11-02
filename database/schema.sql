@@ -324,3 +324,19 @@ CREATE INDEX IF NOT EXISTS ix_security_alerts_updated ON security_alerts (update
 CREATE INDEX IF NOT EXISTS ix_energy_predictions_ingested ON energy_predictions (ingested_at DESC);
 
 INSERT INTO schema_version (version) VALUES (4) ON CONFLICT DO NOTHING;
+
+-- ==========================================================================
+-- Version 5: operator approval of agent actions (AGENT_APPROVAL_MODE=manual)
+-- ==========================================================================
+-- awaiting_approval: passed the safety validator, waiting for an operator;
+-- declined: the operator said no; expired: nobody decided in time.
+ALTER TABLE optimization_actions DROP CONSTRAINT IF EXISTS optimization_actions_status_check;
+ALTER TABLE optimization_actions ADD CONSTRAINT optimization_actions_status_check CHECK (status IN
+    ('proposed', 'awaiting_approval', 'approved', 'rejected', 'declined', 'expired', 'executed', 'failed'));
+
+-- Wall-clock time of the latest write (created_at/updated_at of optimizer commands are simulated
+-- time); the Data Pipeline page uses it to show live throughput.
+ALTER TABLE optimization_actions ADD COLUMN IF NOT EXISTS stored_at TIMESTAMPTZ NOT NULL DEFAULT now();
+CREATE INDEX IF NOT EXISTS ix_optimization_actions_stored ON optimization_actions (stored_at DESC);
+
+INSERT INTO schema_version (version) VALUES (5) ON CONFLICT DO NOTHING;

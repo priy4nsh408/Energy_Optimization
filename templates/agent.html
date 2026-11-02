@@ -18,11 +18,18 @@
       <strong>3. Diagnose</strong><span>Real attack or false alarm? It explains the cause and the energy impact.</span></div>
     <div class="flow-step"><div class="flow-icon bg-grad-orange"><i class="bi bi-shield-check"></i></div>
       <strong>4. Safety check</strong><span>Fixed rules approve or block every proposed action. The AI cannot skip this.</span></div>
+    <div class="flow-step" id="flow-approval"><div class="flow-icon bg-grad-teal"><i class="bi bi-person-check"></i></div>
+      <strong>5. Your approval</strong><span>—</span></div>
     <div class="flow-step"><div class="flow-icon bg-grad-green"><i class="bi bi-gear-wide-connected"></i></div>
-      <strong>5. Act &amp; record</strong><span>Approved actions run on the simulated building; everything is saved.</span></div>
+      <strong>6. Act &amp; record</strong><span>Approved actions run on the simulated building; everything is saved.</span></div>
   </div>
   <p class="small text-muted mb-0 mt-3" id="provider-note">Agent mode: —</p>
 </div></div>
+
+<div class="card mb-3 approval-panel" id="approvals"><div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+  <span><i class="bi bi-person-check"></i> Waiting for your approval <span class="badge text-bg-warning" id="approval-count">0</span></span>
+  <span id="approval-mode"></span></div>
+  <div class="card-body" id="approval-list"><p class="text-muted mb-0">Loading…</p></div></div>
 
 <div class="row g-3 mb-3" id="agent-kpis"></div>
 
@@ -49,7 +56,7 @@
     <option value="">everyone</option><option value="agent" selected>AI agent</option><option value="optimizer">energy optimizer</option><option value="operator">operator</option>
   </select></div>
   <div class="card-body p-0"><div class="table-responsive"><table class="table table-hover mb-0 small">
-    <thead><tr><th>When (sim.)</th><th>Zone</th><th>Who</th><th>What</th><th>Safety check</th><th>Result</th></tr></thead>
+    <thead><tr><th>When (sim.)</th><th>Zone</th><th>Who</th><th>What</th><th>Progress</th><th>Result</th></tr></thead>
     <tbody id="action-table"><tr><td colspan="6" class="text-muted">Loading…</td></tr></tbody></table></div></div></div>
 {% endblock %}
 {% block scripts %}<script src="{{ url_for('static', filename='js/agent.js') }}"></script>{% endblock %}

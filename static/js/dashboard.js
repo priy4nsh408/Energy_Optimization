@@ -138,8 +138,13 @@
   }
 
   async function loadDecision() {
-    const {rows} = await api("/api/agent/decisions?limit=1");
-    if (rows.length) document.getElementById("latest-decision").innerHTML = decisionSummary(rows[0]);
+    const [{rows}, actions] = await Promise.all([api("/api/agent/decisions?limit=1"),
+                                                 api("/api/agent/actions?source=agent&limit=50")]);
+    if (!rows.length) return;
+    // The decision stores each action's status at decision time (e.g. waiting for approval); show the latest one.
+    const latest = Object.fromEntries(actions.rows.map((a) => [a.action_id, a.status]));
+    const d = {...rows[0], actions: (rows[0].actions || []).map((a) => ({...a, status: latest[a.action_id] || a.status}))};
+    document.getElementById("latest-decision").innerHTML = decisionSummary(d);
   }
 
   App.on("readings", (rows) => {
@@ -158,7 +163,8 @@
     rows.slice().reverse().forEach((a) => feed.insertAdjacentHTML("afterbegin", alertItem(a).replace("list-group-item", "list-group-item flash")));
     while (feed.children.length > 8) feed.lastElementChild.remove();
   });
-  App.on("decisions", (rows) => { if (rows.length) document.getElementById("latest-decision").innerHTML = decisionSummary(rows[rows.length - 1]); });
+  App.on("decisions", () => loadDecision().catch(() => {}));
+  App.on("actions", () => loadDecision().catch(() => {}));
   App.on("status", (s) => {
     const counts = s.counts || {};
     document.getElementById("kpi-alerts").textContent = counts.open_alerts ?? "—";

@@ -141,7 +141,21 @@ def _consistency(config) -> list[Check]:
     else:
         checks.append(Check("agent LLM", OK, f"{provider}" + (f" ({agent.llm_model})" if provider == "anthropic"
                                                                else " (rule-based playbook, no LLM)")))
+    checks.append(Check("operator approval", OK, "manual: agent actions wait for an operator on the AI Agent page "
+                        f"(expire after {agent.approval_timeout_s:.0f} s)" if agent.approval_mode == "manual"
+                        else "auto: actions that pass the safety validator run at once"))
     return checks
+
+
+def _slm(config) -> list[Check]:
+    """The small language model is optional: without it explanations and chat use built-in templates."""
+    if not config.SLM.enabled:
+        return [Check("small language model", OK, "off (built-in templates for explanations and chat)")]
+    from agent.slm import create_slm
+
+    ok, detail = create_slm(config.SLM).available()
+    return [Check("small language model", OK if ok else WARN, detail,
+                  "" if ok else f"install Ollama, then: ollama pull {config.SLM.model} (or set SLM_PROVIDER=off)")]
 
 
 def _external_data(config) -> list[Check]:
@@ -175,7 +189,7 @@ def _dashboard(config) -> list[Check]:
     return checks
 
 
-CHECKS: list[Callable] = [_env_file, _packages, _consistency, _external_data, _kafka, _database, _models, _dashboard]
+CHECKS: list[Callable] = [_env_file, _packages, _consistency, _slm, _external_data, _kafka, _database, _models, _dashboard]
 
 
 def run_checks() -> list[Check]:

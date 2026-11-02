@@ -1,4 +1,9 @@
-"""Proposed agent actions and their lifecycle (proposed -> approved | rejected -> executed | failed)."""
+"""Proposed agent actions and their lifecycle.
+
+proposed -> approved | rejected -> executed | failed; with operator approval
+(``AGENT_APPROVAL_MODE=manual``) an approved proposal first becomes
+``awaiting_approval`` and then approved, declined or expired.
+"""
 
 from __future__ import annotations
 
@@ -40,6 +45,7 @@ class ProposedAction:
     result: str | None = None
     source: str = "agent"
     action_id: str = field(default="")
+    explanation: dict[str, Any] | None = None   # plain-language explanation shown to the operator
 
     def __post_init__(self) -> None:
         if not self.action_id:
@@ -58,7 +64,8 @@ class ProposedAction:
             "action_type": self.action_type,
             "status": self.status,
             "parameters": {**self.parameters, "decision_id": self.decision_id,
-                           **({"result": self.result} if self.result else {})},
+                           **({"result": self.result} if self.result else {}),
+                           **({"approval": self.explanation} if self.explanation else {})},
             "reason": self.reason[:2000],
             "safety_reason": (self.safety_reason or "")[:2000] or None,
             "related_alert_id": self.related_alert_id,

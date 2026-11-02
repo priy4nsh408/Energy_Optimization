@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Data Pipeline{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='css/pipeline.css') }}">{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1><i class="bi bi-diagram-3"></i> Data pipeline</h1>
+  <p class="lead-sm">How data flows through the system, live. Moving lines carry data right now; click any box to see
+    what it does.</p>
+</div>
+
+<details class="explain">
+  <summary>How to read this diagram</summary>
+  <ul>
+    <li><strong>Left to right</strong>: data is produced (simulated building, weather and carbon services), carried by
+      <strong>Kafka</strong>, processed by independent services, stored in <strong>PostgreSQL</strong> and shown on the
+      dashboard.</li>
+    <li><strong>Lines</strong>: <span class="legend-flow flowing"></span> data flowing in the last minute,
+      <span class="legend-flow trickle"></span> occasional (e.g. weather every 15 minutes),
+      <span class="legend-flow idle"></span> idle. Thicker lines carry more messages.</li>
+    <li><strong>The loop at the bottom</strong> is the feedback path: the AI agent's actions go through the safety check
+      and your approval, then back to the building, which changes the next readings.</li>
+  </ul>
+</details>
+
+<div class="row g-3 mb-3" id="pipeline-kpis"></div>
+
+<div class="row g-3 mb-3">
+  <div class="col-12 col-xxl-9"><div class="card h-100"><div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-bezier2"></i> Live data flow</span><span class="hint" id="pipeline-updated">—</span></div>
+    <div class="card-body"><div class="pipe-scroll"><div class="pipe" id="pipe">
+      <svg class="pipe-edges" id="pipe-edges" viewBox="0 0 1200 760" preserveAspectRatio="none" aria-hidden="true"></svg>
+    </div></div></div></div></div>
+  <div class="col-12 col-xxl-3"><div class="card h-100"><div class="card-header"><i class="bi bi-info-circle"></i> <span id="detail-title">Details</span></div>
+    <div class="card-body small" id="detail-body"><p class="text-muted mb-0">Click a box in the diagram to see what it does
+      and its live numbers.</p></div></div></div>
+</div>
+
+<div class="row g-3">
+  <div class="col-12 col-xl-6"><div class="card h-100"><div class="card-header"><i class="bi bi-signpost-split"></i> Follow one sensor reading</div>
+    <div class="card-body"><ol class="journey" id="journey"></ol></div></div></div>
+  <div class="col-12 col-xl-6"><div class="card h-100"><div class="card-header"><i class="bi bi-table"></i> Every stage in numbers</div>
+    <div class="card-body p-0"><div class="table-responsive"><table class="table table-sm table-hover mb-0 small">
+      <thead><tr><th>Stage</th><th>Writes</th><th>Last minute</th><th>Total</th><th>Latest</th></tr></thead>
+      <tbody id="stage-table"><tr><td colspan="5" class="text-muted">Loading…</td></tr></tbody></table></div></div></div></div>
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/pipeline.js') }}"></script>{% endblock %}

@@ -66,17 +66,18 @@ class SafetyValidator:
                  models: dict[str, ZoneEnergyModel], isolation: SensorIsolationRegistry) -> None:
         self.agent, self.optimization = agent, optimization
         self.models, self.isolation = models, isolation
-        self._history: list[tuple[str, datetime]] = []         # (zone, time) of approved control actions
+        self._history: list[tuple[str, datetime, str]] = []    # (zone, time, action id) of approved actions
         self._lock = threading.Lock()
 
     # -- bookkeeping ------------------------------------------------------------------
     def record_approved(self, action: ProposedAction, at: datetime) -> None:
         with self._lock:
-            self._history.append((action.zone_id, at))
+            self._history.append((action.zone_id, at, action.action_id))
 
-    def _recent_count(self, zone_id: str, now: datetime) -> int:
+    def _recent_count(self, zone_id: str, now: datetime, exclude: str | None = None) -> int:
         with self._lock:
-            return sum(1 for z, t in self._history if z == zone_id and now - timedelta(hours=1) < t <= now)
+            return sum(1 for z, t, a in self._history
+                       if z == zone_id and a != exclude and now - timedelta(hours=1) < t <= now)
 
     # -- validation -------------------------------------------------------------------
     def validate(self, action: ProposedAction, *, latest_event: dict[str, Any] | None, now: datetime,
@@ -90,7 +91,9 @@ class SafetyValidator:
             problems = []
         else:
             problems = self._control_action(action, latest_event, now, zone_alerts)
-        if not problems and self._recent_count(action.zone_id, now) >= self.agent.max_actions_per_zone_per_hour:
+        # The action itself does not count (it was recorded when it first passed, before operator approval).
+        if not problems and self._recent_count(action.zone_id, now, exclude=action.action_id) \
+                >= self.agent.max_actions_per_zone_per_hour:
             problems.append(f"rate limit: already {self.agent.max_actions_per_zone_per_hour} approved "
                             f"actions for {action.zone_id} in the last hour")
         if problems:

@@ -18,6 +18,12 @@ if (-not (Test-Path ".venv\Scripts\python.exe")) { throw "Run scripts\windows\se
 docker compose -f docker/docker-compose.yml --env-file .env up -d
 if ($LASTEXITCODE -ne 0) { throw "docker compose failed - is Docker Desktop running?" }
 
+# Keep the database schema and Kafka topics up to date (both steps are idempotent and quick).
+& .venv\Scripts\python.exe -m database init
+if ($LASTEXITCODE -ne 0) { throw "database init failed - is PostgreSQL running?" }
+& .venv\Scripts\python.exe -m streaming.topics
+if ($LASTEXITCODE -ne 0) { throw "creating Kafka topics failed - is Kafka running?" }
+
 $stackArgs = @("-m", "scripts.run_stack")
 if ($Mode) { $stackArgs += @("--mode", $Mode) }
 if ($MockExternal) { $stackArgs += "--mock-external" }
