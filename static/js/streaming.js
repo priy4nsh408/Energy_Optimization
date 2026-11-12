@@ -52,6 +52,16 @@ const App = (() => {
     time: (v) => v ? String(v).replace("T", " ").slice(0, 16) : "—",
     pct: (v, d = 1) => (v === null || v === undefined) ? "—" : `${Number(v).toFixed(d)} %`,
     label: (v) => String(v ?? "").replaceAll("_", " "),
+    /** Simulated clock with the weekday, e.g. "Sat 2026-11-14 11:15 (weekend)": the simulation runs much
+        faster than real time, so its day and hour rarely match the real clock. */
+    simTime: (v) => {
+      if (!v) return "—";
+      const text = String(v).replace("T", " ").slice(0, 16);
+      const [y, m, d] = text.slice(0, 10).split("-").map(Number);
+      const day = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+      if (Number.isNaN(day)) return text;
+      return `${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][day]} ${text}${day === 0 || day === 6 ? " (weekend)" : ""}`;
+    },
   };
 
   function severityBadge(severity) {
@@ -83,7 +93,7 @@ const App = (() => {
     el.textContent = state;
     el.title = `Simulation: ${state}`;
     el.className = "badge " + ({running: "text-bg-success", paused: "text-bg-warning"}[state] || "text-bg-secondary");
-    document.getElementById("sim-time").textContent = fmt.time(status.latest_reading);
+    document.getElementById("sim-time").textContent = fmt.simTime(status.latest_reading);
     const waiting = Number((status.counts || {}).awaiting_approval || 0);
     const badge = document.getElementById("approval-badge");
     if (badge) {

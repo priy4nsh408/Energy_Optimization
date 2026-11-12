@@ -114,13 +114,33 @@ def _models(config) -> list[Check]:
     detector_set = config.SYSTEM.detector_set
     try:
         models = load_configured_models(config)
-        checks.append(Check("security detectors", OK, f"{detector_set} set, version {models.metadata['version']}"))
+        checks.append(_detector_coverage(models, detector_set))
     except SecurityModelNotFoundError:
         fix = ("python -m security.train --control optimizer" if detector_set == "optimizer_control"
                else "python -m security.train")
         checks.append(Check("security detectors", FAIL,
                             f"no '{detector_set}' detectors in {DETECTOR_ROOTS[detector_set]}", fix))
     return checks
+
+
+def _detector_coverage(models, detector_set: str) -> Check:
+    """Detectors trained on a few weeks only raise false alarms in other seasons."""
+    from datetime import datetime
+
+    from security.train import MIN_SEASONAL_COVERAGE_DAYS
+
+    meta = models.metadata
+    detail = f"{detector_set} set, version {meta['version']}"
+    try:
+        days = (datetime.fromisoformat(str(meta["end"])) - datetime.fromisoformat(str(meta["start"]))).days
+    except (KeyError, ValueError):
+        return Check("security detectors", OK, detail)
+    if days >= MIN_SEASONAL_COVERAGE_DAYS:
+        return Check("security detectors", OK, f"{detail}, trained on {days} days (all seasons)")
+    fix = "python -m security.train" + (" --control optimizer" if detector_set == "optimizer_control" else "")
+    return Check("security detectors", WARN,
+                 f"{detail} trained on only {days} days: expect false temperature-spoofing alerts in "
+                 "other seasons", fix)
 
 
 def _consistency(config) -> list[Check]:

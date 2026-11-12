@@ -286,7 +286,21 @@ const FloorPlan = (() => {
     renderRanking(def, byZone);
     document.getElementById("fp-explain").textContent = def.explain;
     const latest = readings.map((r) => r.event_time).sort().pop();
-    document.getElementById("fp-updated").textContent = latest ? `simulated time ${fmt.time(latest)}` : "waiting for data";
+    document.getElementById("fp-updated").textContent = latest ? `simulated time ${fmt.simTime(latest)}` : "waiting for data";
+    // Explain an empty building: the simulated clock is often at night or on a weekend.
+    const people = readings.reduce((sum, r) => sum + (Number(r.occupancy_count) || 0), 0);
+    const note = document.getElementById("fp-empty");
+    if (note) {
+      note.hidden = !(latest && people === 0);
+      if (latest && people === 0) {
+        const hour = Number(String(latest).slice(11, 13));
+        const weekend = fmt.simTime(latest).includes("weekend");
+        note.textContent = `Nobody is in the building at this simulated time (${weekend ? "weekend" :
+          hour < 7 || hour >= 19 ? "night" : "outside office hours"}). The simulation runs much faster than ` +
+          "real time (a simulated day passes in a few minutes), so its clock rarely matches yours; people arrive " +
+          "from 07:00 on weekdays.";
+      }
+    }
   }
 
   function renderLegend(def) {

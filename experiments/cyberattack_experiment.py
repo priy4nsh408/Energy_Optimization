@@ -255,7 +255,7 @@ def render(ev: Evaluation, models: SecurityModels) -> str:
               f"* False drift alarms: {ev.drift_false_alarms} of {ev.drift_evaluations_clean} window evaluations "
               "without any attack.",
               f"* Drift alarms during point attacks (not counted as false): {ev.drift_alarms_during_point_attacks}.",
-              f"* Data drift (raw inputs vs. January training data): {ev.data_drift_windows} of "
+              f"* Data drift (raw inputs vs. the training data (same hours, day type and month)): {ev.data_drift_windows} of "
               f"{ev.data_drift_evaluations} window evaluations. This is genuine seasonal/weather change "
               "between training and evaluation weeks, reported for ML model monitoring.",
               f"* For comparison, point detectors flagged {g_hit} of {g_total} gradual-manipulation readings "

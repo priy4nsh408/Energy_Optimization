@@ -105,6 +105,38 @@ def test_replay_and_gradual_attacks():
     assert offsets[0] < 0.2 and 1.0 < offsets[-1] <= 2.1                  # slow ramp
 
 
+# --------------------------------------------------------------------------- seasonal training
+def test_drift_reference_matches_month_with_fallback():
+    ref = DriftReference()
+    jan, jul = datetime(2026, 1, 5, 10, tzinfo=timezone.utc), datetime(2026, 7, 6, 10, tzinfo=timezone.utc)
+    for day in range(0, 28, 7):                               # Mondays at 10:00
+        for i in range(30):
+            ref.add("Z1", jan + timedelta(days=day, seconds=i), {"control_error_active": 0.0})
+            ref.add("Z1", jul + timedelta(days=day, seconds=i), {"control_error_active": 1.0})
+    ref.freeze()
+    assert set(ref.sample("Z1", "control_error_active", [jan + timedelta(days=21, hours=0)])) == {0.0}
+    assert set(ref.sample("Z1", "control_error_active", [jul + timedelta(days=7)])) == {1.0}     # same month only
+    # A month without enough reference data falls back to the same hours of all months.
+    assert set(ref.sample("Z1", "control_error_active", [datetime(2026, 4, 6, 10, tzinfo=timezone.utc)])) == {0.0, 1.0}
+    legacy = DriftReference()                                 # detectors saved before ``monthly`` existed
+    legacy.values = dict(ref.values)
+    del legacy.monthly
+    assert len(legacy.sample("Z1", "control_error_active", [jul])) == 240
+
+
+def test_validation_split_is_weekly_for_long_training_data():
+    from types import SimpleNamespace
+
+    from security.train import _validation_split
+    long = [SimpleNamespace(event_time=START + timedelta(days=d)) for d in range(364)]
+    is_validation, description = _validation_split(long)
+    weeks = {d // 7 for d in range(364) if is_validation(START + timedelta(days=d))}
+    assert weeks == set(range(3, 52, 4)) and "every 4th week" in description    # every season validated
+    short = [SimpleNamespace(event_time=START + timedelta(hours=h)) for h in range(28 * 24)]
+    is_validation, description = _validation_split(short)
+    assert not is_validation(START) and is_validation(START + timedelta(days=27))
+
+
 # --------------------------------------------------------------------------- drift statistics
 def test_psi_and_drift_detector():
     rng = np.random.default_rng(0)
