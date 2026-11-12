@@ -43,7 +43,7 @@
   <div class="col-12 col-xl-8"><div class="card h-100"><div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
       <span><i class="bi bi-cpu"></i> ML prediction vs. reality</span>
       <select id="pred-zone" class="form-select form-select-sm w-auto" aria-label="Zone">
-        {% for id, name, type in zones %}<option value="{{ id }}">{{ id }} · {{ name }}</option>{% endfor %}
+        {% for id, name, type, area, capacity in zones %}<option value="{{ id }}">{{ id }} · {{ name }}</option>{% endfor %}
       </select></div>
     <div class="card-body"><div id="chart-predictions" class="chart"></div>
       <p class="small text-muted mb-0">The ML model (XGBoost) predicts each zone's power 5 minutes ahead. The closer the
