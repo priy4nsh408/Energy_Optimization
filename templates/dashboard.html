@@ -17,6 +17,8 @@
       orange is borderline, red is poor. A red border means the zone has a recent security alert.</li>
     <li><strong>Power chart</strong>: how much electricity each zone uses, updated with every new reading.</li>
     <li><strong>Alerts and agent</strong>: the newest security alerts and what the AI agent decided about them.</li>
+    <li><strong>Floor plan</strong> (bottom): a map of the floor coloured by temperature; the buttons switch it to
+      comfort, CO₂, humidity, people, lighting or power.</li>
   </ul>
 </details>
 
@@ -69,5 +71,33 @@
       <div class="card-body small" id="latest-decision"><span class="text-muted">No decisions yet</span></div></div>
   </div>
 </div>
+<div class="card mt-3" id="floorplan">
+  <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+    <span><i class="bi bi-grid-1x2"></i> Floor plan heat map <span class="hint">(sample floor, live)</span></span>
+    <span class="hint" id="fp-updated">—</span></div>
+  <div class="card-body">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+      <div id="fp-metrics" role="group" aria-label="Measure shown on the floor plan"></div>
+    </div>
+    <div class="row g-3">
+      <div class="col-12 col-xl-9">
+        <div class="fp-wrap" id="fp-wrap">
+          <svg id="fp-svg" viewBox="0 0 860 525" role="img" aria-label="Floor plan of the building coloured by the selected measure"></svg>
+          <div class="fp-tooltip" id="fp-tooltip" hidden></div>
+        </div>
+      </div>
+      <div class="col-12 col-xl-3">
+        <div id="fp-legend" class="mb-2"></div>
+        <p class="small text-muted" id="fp-explain"></p>
+        <div class="small fw-semibold mb-1">Rooms, highest first</div>
+        <div id="fp-ranking"></div>
+        <p class="small text-muted mt-2 mb-0">Hover or tap a room for all its readings. A red dashed outline means a
+          recent security alert; ▲/▼ shows whether the room is being heated or cooled. The layout is a sample floor whose
+          room sizes roughly follow the simulated floor areas.</p>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
-{% block scripts %}<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/floorplan.js') }}"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>{% endblock %}

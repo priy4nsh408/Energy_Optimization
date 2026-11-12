@@ -23,7 +23,8 @@ def _render(template: str, **context):
                            max_attack_minutes=MAX_ATTACK_MINUTES, control_mode=config.SYSTEM.control_mode,
                            approval_mode=config.AGENT.approval_mode, approval_timeout_s=config.AGENT.approval_timeout_s,
                            slm_name=f"{config.SLM.model} (Ollama)" if config.SLM.enabled else None,
-                           zones=[(z.zone_id, z.name, z.zone_type) for z in default_zones()], **context)
+                           zones=[(z.zone_id, z.name, z.zone_type, z.floor_area_m2, z.max_occupancy)
+                                  for z in default_zones()], **context)
 
 
 @bp.get("/")

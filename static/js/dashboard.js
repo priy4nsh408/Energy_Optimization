@@ -1,4 +1,4 @@
-/* Main dashboard: KPIs, live zone cards, live power chart, alert feed, latest agent decision. */
+/* Main dashboard: KPIs, live zone cards, live power chart, alert feed, latest agent decision, floor plan. */
 "use strict";
 
 (() => {
@@ -89,6 +89,7 @@
       ? readings.map((r, i) => zoneCard(r, maxPower, i)).join("")
       : '<div class="empty-state"><i class="bi bi-hourglass-split"></i>No readings yet. Press <strong>Start</strong> in the simulation panel.</div>';
     previousTimes = Object.fromEntries(readings.map((r) => [r.zone_id, r.event_time]));
+    if (typeof FloorPlan !== "undefined") FloorPlan.update(readings, alertedZones);
     const latest = readings.map((r) => r.event_time).sort().pop();
     document.getElementById("zones-updated").textContent = latest ? `simulated time ${fmt.time(latest)}` : "—";
     const total = readings.reduce((s, r) => s + (r.total_power_kw || 0), 0);
@@ -158,6 +159,7 @@
   });
   App.on("alerts", (rows) => {
     rows.forEach((a) => a.zone_id && alertedZones.add(a.zone_id));
+    if (typeof FloorPlan !== "undefined") FloorPlan.alerted(alertedZones);
     const feed = document.getElementById("alert-feed");
     if (feed.querySelector(".text-muted:only-child")) feed.innerHTML = "";
     rows.slice().reverse().forEach((a) => feed.insertAdjacentHTML("afterbegin", alertItem(a).replace("list-group-item", "list-group-item flash")));

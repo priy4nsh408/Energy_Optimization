@@ -77,7 +77,7 @@
       <option value="drift">drift</option><option value="validation">invalid messages</option>
     </select>
     <select id="filter-zone" class="form-select form-select-sm w-auto" aria-label="Zone"><option value="">all zones</option>
-      {% for id, name, type in zones %}<option value="{{ id }}">{{ id }} · {{ name }}</option>{% endfor %}</select>
+      {% for id, name, type, area, capacity in zones %}<option value="{{ id }}">{{ id }} · {{ name }}</option>{% endfor %}</select>
   </div></div>
   <div class="card-body p-0"><div class="table-responsive scroll-table"><table class="table table-hover mb-0 small">
     <thead><tr><th>When (sim.)</th><th>Zone</th><th>What</th><th>Severity</th><th>Detected by</th><th>Evidence, in plain words</th></tr></thead>
