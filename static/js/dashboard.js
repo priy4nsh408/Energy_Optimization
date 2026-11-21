@@ -38,7 +38,7 @@
       yaxis2: {title: "kW building", overlaying: "y", side: "right", rangemode: "tozero", showgrid: false},
       margin: {l: 50, r: 55, t: 10, b: 40}}, "No readings yet. Press Start to run the simulation.");
     const latest = times[times.length - 1];
-    document.getElementById("power-updated").textContent = latest ? `simulated time ${fmt.time(latest)}` : "—";
+    document.getElementById("power-updated").textContent = latest ? `simulated time ${fmt.simTime(latest)}` : "—";
   }
 
   function level(value, good, ok) {
@@ -91,7 +91,7 @@
     previousTimes = Object.fromEntries(readings.map((r) => [r.zone_id, r.event_time]));
     if (typeof FloorPlan !== "undefined") FloorPlan.update(readings, alertedZones);
     const latest = readings.map((r) => r.event_time).sort().pop();
-    document.getElementById("zones-updated").textContent = latest ? `simulated time ${fmt.time(latest)}` : "—";
+    document.getElementById("zones-updated").textContent = latest ? `simulated time ${fmt.simTime(latest)}` : "—";
     const total = readings.reduce((s, r) => s + (r.total_power_kw || 0), 0);
     document.getElementById("kpi-power").textContent = readings.length ? `${fmt.num(total, 1)} kW` : "—";
     const people = readings.reduce((s, r) => s + (Number(r.occupancy_count) || 0), 0);

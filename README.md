@@ -696,14 +696,15 @@ window (`details.window_start/end`, `scope = "distribution_window"`). Alerts are
 zone and type (15 min; 6 h for data drift).
 
 ```powershell
-python -m security.train                         # train on clean data (or --source db)
+python -m security.train                         # train on a clean simulated year (or --source db)
 python -m workers.security_service               # Kafka: building_sensor_data -> security_alerts
 python -m experiments.cyberattack_experiment --week test2 --report docs/results/security_evaluation.md
 ```
 
 ### Evaluation (labelled simulated attacks)
 
-The detectors are trained on 28 clean simulated days (January, 40,320 readings). Each evaluation week
+The first detectors were trained on 28 clean simulated days (January, 40,320 readings); see
+*Fix: multi-season detectors* below for the current full-year training. Each evaluation week
 has 10,080 readings with scheduled attacks. Point metrics exclude gradual-manipulation readings
 (those are evaluated as drift) and the first reading after each attack.
 
@@ -730,8 +731,36 @@ HVAC-contradiction rule. Its "possible control error per HVAC state" ranges were
 **January** data and do not fit spring weather. The data-drift monitor flagged this mismatch (809 of
 814 windows).
 
-Mitigations, not yet evaluated: train on recent or multi-season data and retrain when data drift
-persists, or derive these bounds from thermostat logic instead of history.
+**Fix: multi-season detectors.** The live simulation keeps running through all seasons (one real
+hour is about 12 simulated days), so the January-only detectors raised false temperature-spoofing
+alerts most of the year. On clean simulated weeks with no attack (seed 99), the January detectors
+flagged 0 (February), 2,733 (April), 4,773 (July) and 610 (November) readings as temperature
+spoofing. The detectors are now trained on a full clean simulated year (52 weeks, 524,160 readings):
+
+- `python -m security.train` defaults to 364 days; every 4th week is the validation set, so threshold
+  calibration covers every season;
+- the drift reference is matched by month as well as hour and day type (fallback: all months);
+- security drift needs a window-mean shift of 1.0 reference standard deviations (was 0.5), which
+  keeps clean-validation false drift alarms below 2 % per zone across the year. The disabled
+  monitors are the same as with the January detectors (the CO₂-residual monitors of Z1–Z4).
+
+Results with the multi-season detectors (same weeks and seeds as above; evaluated after the
+choices above were made on clean validation data):
+
+| Week | Precision | Recall | F1 | False-positive rate | Security-drift false alarms | Attack segments detected | Gradual attacks detected |
+|---|---|---|---|---|---|---|---|
+| development (Feb 9) | 0.901 | 0.983 | 0.940 | 0.13 % | 2 / 763 | 6 of 6 | 1 of 1 |
+| test 1 (Feb 16) | 0.867 | 0.935 | 0.900 | 0.25 % | 6 / 722 | 10 of 10 | 2 of 2 |
+| test 2 (Mar 2) | 0.883 | 0.988 | 0.933 | 0.23 % | 10 / 719 | 11 of 11 | 2 of 2 |
+
+False temperature-spoofing flags on the clean seed-99 weeks: 1 (February), 0 (April), 0 (July),
+0 (November).
+
+*Trade-off:* the year-wide control-error ranges are wider than January's. In test week 1, 8 of 36
+spoofed readings were missed (recall for spoofing 0.78; 1.00 in test week 2), although both spoofing
+attacks were detected at their first reading. Month-specific ranges were tried and rejected: they
+caught all 36 but fitted one simulated year's weather too tightly (48–56 false spoofing flags per
+clean week in other years).
 
 **Other limitations:**
 

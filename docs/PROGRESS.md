@@ -68,7 +68,7 @@ These are git-ignored, either because they are large or because they are generat
 | Project datasets | Copy your three files into `data/raw/` with these exact names: `KAG_energydata_complete.csv` (SHA-256 `2820bf71…a25d`), `test_energy_data.csv` (`01c85f8d…26da`) and `energy_consumption.csv` (`74cfb5a3…9301`). Then run `python -m ml.train --dataset all --report docs/results/energy_prediction_combined.md`. |
 | Building history in PostgreSQL | Run `python -m workers.sensor_persistence` in one terminal, and in another: `python -m workers.sensor_publisher --fast --interval 1 --speed 300 --ticks 8064 --seed 2026 --start 2026-01-05T00:00` |
 | ML models (`ml/artifacts/`) | `python -m ml.train --dataset kag`, then `python -m ml.train --dataset building --start 2026-01-05T00:00+00:00 --end 2026-02-02T00:00+00:00` |
-| Security detectors (`security/artifacts/`) | `python -m security.train` (28 clean simulated days, seed 2026); also needed by `agent.demo` and the agent's anomaly/drift tools |
+| Security detectors (`security/artifacts/`) | `python -m security.train` (a clean simulated year, seed 2026; retrain once if your detectors are older); also needed by `agent.demo` and the agent's anomaly/drift tools |
 | Agent audit log (`logs/agent_decisions.jsonl`) | Created automatically |
 | Optimizer-controlled detectors (`security/artifacts/optimizer_control/`) | Trained by `python -m experiments.evaluation` (version `20261030T165511Z` was used for the reported runs) |
 | API cache (`data/cache/`), logs | Created automatically |
@@ -125,9 +125,10 @@ These are git-ignored, either because they are large or because they are generat
 
 ## Known open issues to remember
 
-1. **Security false positives across seasons.** The HVAC-contradiction rule was learned from
-   January data and has a 3.9 % false-positive rate in March. Fix ideas: multi-season or recent
-   training data, retraining triggered by data drift, or bounds derived from thermostat logic.
+1. **Security false positives across seasons — fixed.** The January-only detectors flagged thousands of
+   normal spring/summer readings as temperature spoofing. Detectors are now trained on a full simulated
+   year with month-matched drift references (README, *Fix: multi-season detectors*). Remaining
+   trade-off: spoofing recall 0.78 in test week 1 (both attacks still detected at their first reading).
 2. **The optimizer ignores the ML forecast in practice.** The forecast shifts the objective by a
    constant, so decisions are the same with or without it. Fix idea: calibrate the heat-balance
    model per zone using the forecasts and measurements.

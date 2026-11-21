@@ -25,7 +25,10 @@ from security.drift_detector import (
 from security.features import FeatureTracker
 
 _ZONE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
-SECURITY_DRIFT_EFFECT_SIZE = 0.5
+# Window mean must move by at least this many reference standard deviations. 1.0 (not 0.5) keeps
+# false drift alarms on clean validation weeks of a full simulated year below 2 % per zone
+# (summer cooling afternoons vary more than the January data the first detectors saw).
+SECURITY_DRIFT_EFFECT_SIZE = 1.0
 
 
 @dataclass

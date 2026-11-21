@@ -6,9 +6,12 @@ while the distribution moves. Every ``step`` readings per zone, the last
 ``window`` readings of each monitored feature are compared with a reference
 sample from clean training data.
 
-To avoid flagging the normal daily cycle as drift, the reference is
-*condition-matched*: only training readings from the same hours of the day
-and the same day type (weekday/weekend) as the window are used.
+To avoid flagging the normal daily and seasonal cycles as drift, the reference
+is *condition-matched*: only training readings from the same hours of the day,
+the same day type (weekday/weekend) and the same month as the window are used.
+If the training data has too few readings for that month (e.g. detectors
+trained on a few weeks only), the same hours and day type from all months are
+used instead.
 
 Two kinds of drift are monitored with separate detectors:
 
@@ -49,6 +52,7 @@ SECURITY_DRIFT_FEATURES = ("control_error_active", "co2_residual")
 DATA_DRIFT_FEATURES = ("temperature_c", "humidity_pct", "co2_ppm", "total_power_kw")
 DRIFT_FEATURES = SECURITY_DRIFT_FEATURES + DATA_DRIFT_FEATURES
 MIN_WINDOW_VALUES = 12
+MIN_SEASONAL_REFERENCE = 100   # below this, fall back to all months
 PSI_BINS = 10
 PSI_EPSILON = 1e-4
 
@@ -91,23 +95,34 @@ class DriftResult:
 
 @dataclass
 class DriftReference:
-    """Clean reference values per zone, feature, day type and hour."""
+    """Clean reference values per zone, feature, day type and hour (all months), and the same
+    split by month (``monthly``; absent in detectors saved before it existed)."""
 
     values: dict = field(default_factory=lambda: defaultdict(list))
+    monthly: dict = field(default_factory=lambda: defaultdict(list))
 
     def add(self, zone_id: str, when: datetime, row: dict[str, float],
             features: tuple[str, ...] = DRIFT_FEATURES) -> None:
         for feature in features:
             value = row.get(feature)
             if value is not None and not np.isnan(value):
-                self.values[(zone_id, feature, when.weekday() >= 5, when.hour)].append(value)
+                key = (zone_id, feature, when.weekday() >= 5, when.hour)
+                self.values[key].append(value)
+                self.monthly[(*key, when.month)].append(value)
 
     def sample(self, zone_id: str, feature: str, times: list[datetime]) -> np.ndarray:
+        monthly = getattr(self, "monthly", None)
+        if monthly:
+            keys = {(zone_id, feature, t.weekday() >= 5, t.hour, t.month) for t in times}
+            seasonal = [v for key in keys for v in monthly.get(key, [])]
+            if len(seasonal) >= MIN_SEASONAL_REFERENCE:
+                return np.array(seasonal, dtype=float)
         keys = {(zone_id, feature, t.weekday() >= 5, t.hour) for t in times}
         return np.array([v for key in keys for v in self.values.get(key, [])], dtype=float)
 
     def freeze(self) -> "DriftReference":
         self.values = {k: list(v) for k, v in self.values.items()}
+        self.monthly = {k: list(v) for k, v in getattr(self, "monthly", {}).items()}
         return self
 
 
